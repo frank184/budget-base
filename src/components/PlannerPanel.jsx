@@ -11,7 +11,8 @@ export function PlannerPanel({
   onViewChange,
   onAdd,
   onUpdate,
-  onDelete
+  onDelete,
+  onReorder
 }) {
   function toneClass(value) {
     if (value === 0) return "neutral";
@@ -19,6 +20,8 @@ export function PlannerPanel({
   }
 
   const [plannedDrafts, setPlannedDrafts] = useState({});
+  const [draggedCategoryId, setDraggedCategoryId] = useState(null);
+  const [dragOverCategoryId, setDragOverCategoryId] = useState(null);
 
   useEffect(() => {
     const nextDrafts = {};
@@ -38,6 +41,17 @@ export function PlannerPanel({
       [categoryId]: normalized
     }));
     onUpdate(categoryId, "planned", normalized);
+  }
+
+  function handleDrop(targetCategoryId, type) {
+    if (!draggedCategoryId || draggedCategoryId === targetCategoryId) {
+      setDragOverCategoryId(null);
+      return;
+    }
+
+    onReorder(draggedCategoryId, targetCategoryId, type);
+    setDraggedCategoryId(null);
+    setDragOverCategoryId(null);
   }
 
   const groupedCategories =
@@ -103,6 +117,7 @@ export function PlannerPanel({
             {view === "all" ? <div className="category-group-heading">{group.label}</div> : null}
             <table className="planner-table">
               <colgroup>
+                <col className="planner-col-drag" />
                 <col className="planner-col-category" />
                 <col className="planner-col-planned" />
                 <col className="planner-col-actual" />
@@ -111,6 +126,7 @@ export function PlannerPanel({
               </colgroup>
               <thead>
                 <tr>
+                  <th className="planner-col-drag" />
                   <th className="planner-col-category">Category</th>
                   <th className="planner-col-planned">Planned</th>
                   <th className="planner-col-actual numeric">Actual</th>
@@ -124,7 +140,45 @@ export function PlannerPanel({
                   const diff =
                     group.type === "expense" ? category.planned - actual : actual - category.planned;
                   return (
-                    <tr key={category.id}>
+                    <tr
+                      key={category.id}
+                      className={dragOverCategoryId === category.id ? "planner-row-dragover" : ""}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        if (draggedCategoryId && draggedCategoryId !== category.id) {
+                          setDragOverCategoryId(category.id);
+                        }
+                      }}
+                      onDragLeave={() => {
+                        if (dragOverCategoryId === category.id) {
+                          setDragOverCategoryId(null);
+                        }
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        handleDrop(category.id, group.type);
+                      }}
+                    >
+                      <td className="planner-drag-cell">
+                        <button
+                          type="button"
+                          className="planner-drag-handle"
+                          draggable
+                          aria-label={`Reorder ${category.name}`}
+                          title={`Drag to reorder ${group.type} categories`}
+                          onDragStart={(event) => {
+                            event.dataTransfer.effectAllowed = "move";
+                            event.dataTransfer.setData("text/plain", category.id);
+                            setDraggedCategoryId(category.id);
+                          }}
+                          onDragEnd={() => {
+                            setDraggedCategoryId(null);
+                            setDragOverCategoryId(null);
+                          }}
+                        >
+                          <span aria-hidden="true">::</span>
+                        </button>
+                      </td>
                       <td>
                         <input
                           value={category.name}

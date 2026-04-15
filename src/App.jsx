@@ -160,6 +160,31 @@ export default function App() {
     });
   }
 
+  function handleCategoryReorder(draggedCategoryId, targetCategoryId, type) {
+    if (!draggedCategoryId || !targetCategoryId || draggedCategoryId === targetCategoryId) return;
+
+    patchMonth((draft) => {
+      const typedCategories = draft.categories.filter((category) => category.type === type);
+      const draggedIndex = typedCategories.findIndex((category) => category.id === draggedCategoryId);
+      const targetIndex = typedCategories.findIndex((category) => category.id === targetCategoryId);
+
+      if (draggedIndex === -1 || targetIndex === -1) {
+        return draft;
+      }
+
+      const reordered = typedCategories.slice();
+      const [moved] = reordered.splice(draggedIndex, 1);
+      reordered.splice(targetIndex, 0, moved);
+
+      let typedIndex = 0;
+      draft.categories = draft.categories.map((category) =>
+        category.type === type ? reordered[typedIndex++] : category
+      );
+
+      return draft;
+    });
+  }
+
   function handleTransactionUpdate(transactionId, key, value) {
     patchMonth((draft) => {
       const transaction = draft.transactions.find((entry) => entry.id === transactionId);
@@ -324,6 +349,7 @@ export default function App() {
             onAdd={handleCategoryAdd}
             onUpdate={handleCategoryUpdate}
             onDelete={handleCategoryDelete}
+            onReorder={handleCategoryReorder}
           />
         </section>
 

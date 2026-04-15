@@ -677,39 +677,39 @@ table {
   table-layout: fixed;
 }
 
+.planner-table col.planner-col-drag,
+.planner-table .planner-col-drag,
+.planner-table tbody td:first-child {
+  width: 28px;
+}
+
 .planner-table col.planner-col-category,
 .planner-table .planner-col-category,
-.planner-table tbody td:first-child {
-  width: 30%;
+.planner-table tbody td:nth-child(2) {
+  width: 28%;
 }
 
 .planner-table col.planner-col-planned,
 .planner-table .planner-col-planned,
-.planner-table tbody td:nth-child(2) {
+.planner-table tbody td:nth-child(3) {
   width: 26%;
 }
 
 .planner-table col.planner-col-actual,
 .planner-table .planner-col-actual,
-.planner-table tbody td:nth-child(3) {
+.planner-table tbody td:nth-child(4) {
   width: 18%;
 }
 
 .planner-table col.planner-col-diff,
 .planner-table .planner-col-diff,
-.planner-table tbody td:nth-child(4) {
+.planner-table tbody td:nth-child(5) {
   width: 16%;
 }
 
 .planner-table col.planner-col-actions,
-.planner-table .planner-col-actions,
-.planner-table tbody td:nth-child(5) {
+.planner-table .planner-col-actions {
   width: 44px;
-}
-
-.planner-table tbody td:nth-child(5) {
-  padding-left: 0;
-  padding-right: 0;
 }
 
 .planner-table td.numeric,
@@ -748,9 +748,44 @@ td.numeric {
   text-align: right;
 }
 
-.row-actions {
-  display: flex;
+.planner-drag-cell {
+  padding-right: 2px;
+}
+
+.planner-drag-handle {
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
+  width: 20px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  margin: 0 10px;
+}
+
+.planner-drag-handle span {
+  color: var(--muted);
+}
+
+.planner-drag-handle:hover,
+.planner-drag-handle:focus-visible {
+  background: color-mix(in srgb, var(--accent-soft) 60%, transparent);
+  color: var(--text);
+}
+
+.planner-drag-handle:active {
+  cursor: grabbing;
+}
+
+.planner-row-dragover {
+  background: color-mix(in srgb, var(--accent-soft) 50%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 35%, var(--line)),
+    inset 0 -1px 0 color-mix(in srgb, var(--accent) 35%, var(--line));
 }
 
 .category-group+.category-group {
@@ -772,6 +807,16 @@ td.numeric {
   align-items: center;
   justify-content: center;
   display: inline-flex;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  align-self: center;
+}
+
+.icon-button:hover,
+.icon-button:focus-visible {
+  background: color-mix(in srgb, var(--accent-soft) 60%, transparent);
+  color: var(--text);
 }
 
 .transaction-layout {
@@ -839,13 +884,17 @@ td.numeric {
   border-bottom: 0;
 }
 
-.transaction-row:hover {
-  background: color-mix(in srgb, var(--accent-soft) 48%, transparent);
-}
-
 .transaction-row.active {
   background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
   box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.transaction-row:hover:has(.transaction-row-kind-expense) {
+  background: color-mix(in srgb, var(--bad-soft) 52%, transparent);
+}
+
+.transaction-row:hover:has(.transaction-row-kind-income) {
+  background: color-mix(in srgb, var(--accent-soft) 48%, transparent);
 }
 
 .transaction-row.active:has(.transaction-row-kind-expense) {
