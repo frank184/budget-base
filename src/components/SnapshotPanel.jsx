@@ -6,17 +6,22 @@ function isComparisonBad(row) {
 }
 
 export function SnapshotPanel({ month, totals, formatCurrency }) {
+  const plannedEnd = month.startingBalance + totals.plannedNet;
+  const actualEnd = month.startingBalance + totals.actualNet;
   const comparisonRows = [
     { label: "Income", planned: totals.plannedIncome, actual: totals.actualIncome },
     { label: "Expenses", planned: totals.plannedExpenses, actual: totals.actualExpenses },
     {
       label: "End Balance",
-      planned: month.startingBalance + totals.plannedNet,
-      actual: month.startingBalance + totals.actualNet
+      planned: plannedEnd,
+      actual: actualEnd
     }
   ];
 
-  const maxComparison = Math.max(...comparisonRows.flatMap((row) => [row.planned, row.actual]), 1);
+  const maxComparison = Math.max(
+    ...comparisonRows.flatMap((row) => [Math.abs(row.planned), Math.abs(row.actual)]),
+    1
+  );
 
   const breakdownRows = month.expenseCategories
     .map((category) => ({
@@ -51,7 +56,6 @@ export function SnapshotPanel({ month, totals, formatCurrency }) {
       <div className="panel-head">
         <div>
           <p className="section-label">Visuals</p>
-          <h2>Month Snapshot</h2>
         </div>
       </div>
 
@@ -68,12 +72,12 @@ export function SnapshotPanel({ month, totals, formatCurrency }) {
                   </span>
                 </div>
                 <div className="bar-track">
-                  <div className="bar-fill planned" style={{ width: `${(row.planned / maxComparison) * 100}%` }} />
+                  <div className="bar-fill planned" style={{ width: `${(Math.abs(row.planned) / maxComparison) * 100}%` }} />
                 </div>
                 <div className="bar-track">
                   <div
                     className={`bar-fill actual ${isComparisonBad(row) ? "over" : ""}`}
-                    style={{ width: `${(row.actual / maxComparison) * 100}%` }}
+                    style={{ width: `${(Math.abs(row.actual) / maxComparison) * 100}%` }}
                   />
                 </div>
               </div>
@@ -88,6 +92,7 @@ export function SnapshotPanel({ month, totals, formatCurrency }) {
               <div className="breakdown-item" key={row.name}>
                 <div className="breakdown-head">
                   <span className="breakdown-label">{row.name}</span>
+                  &nbsp;
                   <span>{formatCurrency(row.actual)}</span>
                 </div>
                 <div className="bar-track">

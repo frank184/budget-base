@@ -19,8 +19,12 @@ import { TransactionPanel } from "./components/TransactionPanel";
 export default function App() {
   const [state, setState] = useState(() => loadBudgetState(STORAGE_KEY));
   const [planView, setPlanView] = useState("expense");
-  const [transactionView, setTransactionView] = useState("expense");
-  const [selectedTransactionId, setSelectedTransactionId] = useState(null);
+  const [transactionView, setTransactionView] = useState("all");
+  const [selectedTransactionIds, setSelectedTransactionIds] = useState({
+    all: null,
+    expense: null,
+    income: null
+  });
   const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || "light");
 
   const month = useMemo(() => getCurrentMonth(state), [state]);
@@ -30,9 +34,32 @@ export default function App() {
     () => getCategories(month, transactionView),
     [month, transactionView]
   );
+  const transactionCategoryLookup = useMemo(
+    () => ({
+      expense: Object.fromEntries(month.expenseCategories.map((category) => [category.id, category.name])),
+      income: Object.fromEntries(month.incomeCategories.map((category) => [category.id, category.name]))
+    }),
+    [month]
+  );
   const transactions = useMemo(
     () => getTransactions(month, transactionView),
     [month, transactionView]
+  );
+  const allTransactions = useMemo(() => {
+    const expense = month.expenseTransactions.map((transaction) => ({
+      ...transaction,
+      kind: "expense"
+    }));
+    const income = month.incomeTransactions.map((transaction) => ({
+      ...transaction,
+      kind: "income"
+    }));
+    return [...expense, ...income].sort((a, b) => b.date.localeCompare(a.date));
+  }, [month]);
+  const visibleTransactions = transactionView === "all" ? allTransactions : transactions;
+  const sortedVisibleTransactions = useMemo(
+    () => visibleTransactions.slice().sort((a, b) => b.date.localeCompare(a.date)),
+    [visibleTransactions]
   );
   const currencyFormatter = useMemo(
     () => (value) => formatCurrency(value, state.currency || "CAD"),
@@ -49,19 +76,30 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    if (!transactions.length) {
-      setSelectedTransactionId(null);
+    if (!sortedVisibleTransactions.length) {
+      setSelectedTransactionIds((current) => ({
+        ...current,
+        [transactionView]: null
+      }));
       return;
     }
 
-    const exists = transactions.some((transaction) => transaction.id === selectedTransactionId);
+    const selectedTransactionId = selectedTransactionIds[transactionView];
+    const exists = sortedVisibleTransactions.some((transaction) => transaction.id === selectedTransactionId);
     if (!exists) {
-      setSelectedTransactionId(transactions[0].id);
+      setSelectedTransactionIds((current) => ({
+        ...current,
+        [transactionView]: sortedVisibleTransactions[0].id
+      }));
     }
-  }, [transactions, selectedTransactionId]);
+  }, [transactionView, sortedVisibleTransactions, selectedTransactionIds]);
 
+  const selectedTransactionId = selectedTransactionIds[transactionView];
   const selectedTransaction =
-    transactions.find((transaction) => transaction.id === selectedTransactionId) || null;
+    sortedVisibleTransactions.find((transaction) => transaction.id === selectedTransactionId) || null;
+  const selectedTransactionKind = selectedTransaction?.kind || transactionView;
+  const selectedTransactionCategories =
+    selectedTransactionKind === "income" ? month.incomeCategories : month.expenseCategories;
 
   function patchMonth(recipe) {
     setState((current) => ({
@@ -74,7 +112,11 @@ export default function App() {
 
   function handleMonthSelect(monthId) {
     setState((current) => ({ ...current, selectedMonthId: monthId }));
-    setSelectedTransactionId(null);
+    setSelectedTransactionIds({
+      all: null,
+      expense: null,
+      income: null
+    });
   }
 
   function handleMonthRemove() {
@@ -89,7 +131,11 @@ export default function App() {
       selectedMonthId: fallback.id,
       months: current.months.filter((entry) => entry.id !== current.selectedMonthId)
     }));
-    setSelectedTransactionId(null);
+    setSelectedTransactionIds({
+      all: null,
+      expense: null,
+      income: null
+    });
   }
 
   function handleCategoryUpdate(categoryId, key, value) {
@@ -114,6 +160,7 @@ export default function App() {
   }
 
   function handleCategoryAdd() {
+    if (planView === "all") return;
     patchMonth((draft) => {
       getCategories(draft, planView).push({
         id: crypto.randomUUID(),
@@ -126,13 +173,20 @@ export default function App() {
 
   function handleTransactionUpdate(transactionId, key, value) {
     patchMonth((draft) => {
-      const transaction = getTransactions(draft, transactionView).find((entry) => entry.id === transactionId);
+      const targetKind =
+        transactionView === "all"
+          ? draft.expenseTransactions.some((entry) => entry.id === transactionId)
+            ? "expense"
+            : "income"
+          : transactionView;
+      const transaction = getTransactions(draft, targetKind).find((entry) => entry.id === transactionId);
       transaction[key] = key === "amount" ? toAmount(value) : value;
       return draft;
     });
   }
 
   function handleTransactionAdd() {
+    if (transactionView === "all") return;
     if (!transactionCategories.length) return;
 
     const transaction = {
@@ -147,17 +201,60 @@ export default function App() {
       getTransactions(draft, transactionView).unshift(transaction);
       return draft;
     });
-    setSelectedTransactionId(transaction.id);
+    setSelectedTransactionIds((current) => ({
+      ...current,
+      [transactionView]: transaction.id
+    }));
   }
 
   function handleTransactionDelete(transactionId) {
     patchMonth((draft) => {
-      const target = getTransactions(draft, transactionView);
+      const targetKind =
+        transactionView === "all"
+          ? draft.expenseTransactions.some((entry) => entry.id === transactionId)
+            ? "expense"
+            : "income"
+          : transactionView;
+      const target = getTransactions(draft, targetKind);
       const index = target.findIndex((entry) => entry.id === transactionId);
       if (index >= 0) target.splice(index, 1);
       return draft;
     });
-    setSelectedTransactionId(null);
+    setSelectedTransactionIds((current) => ({
+      ...current,
+      [transactionView]: null,
+      all: current.all === transactionId ? null : current.all,
+      expense: current.expense === transactionId ? null : current.expense,
+      income: current.income === transactionId ? null : current.income
+    }));
+  }
+
+  function handleTransactionViewChange(nextView) {
+    const nextTransactions =
+      nextView === "all"
+        ? allTransactions
+        : getTransactions(month, nextView).map((transaction) => ({
+            ...transaction,
+            kind: nextView
+          }));
+    const sortedNextTransactions = nextTransactions
+      .slice()
+      .sort((a, b) => b.date.localeCompare(a.date));
+
+    setTransactionView(nextView);
+    setSelectedTransactionIds((current) => {
+      const rememberedId = current[nextView];
+      const hasRememberedMatch = sortedNextTransactions.some(
+        (transaction) => transaction.id === rememberedId
+      );
+
+      if (hasRememberedMatch) return current;
+
+      return {
+        ...current,
+        [nextView]: sortedNextTransactions[0]?.id || null
+      };
+    });
   }
 
   function handleExport() {
@@ -182,7 +279,11 @@ export default function App() {
           ...parsed,
           selectedMonthId: parsed.selectedMonthId || parsed.months[0].id
         });
-        setSelectedTransactionId(null);
+        setSelectedTransactionIds({
+          all: null,
+          expense: null,
+          income: null
+        });
       } catch (error) {
         window.alert(error.message);
       } finally {
@@ -208,7 +309,11 @@ export default function App() {
         onImport={handleImport}
         onReset={() => {
           setState(createSampleState());
-          setSelectedTransactionId(null);
+          setSelectedTransactionIds({
+            all: null,
+            expense: null,
+            income: null
+          });
         }}
       />
 
@@ -235,6 +340,7 @@ export default function App() {
           <PlannerPanel
             view={planView}
             categories={planCategories}
+            month={month}
             totals={totals}
             formatCurrency={currencyFormatter}
             onViewChange={setPlanView}
@@ -248,10 +354,17 @@ export default function App() {
           <TransactionPanel
             view={transactionView}
             categories={transactionCategories}
-            transactions={transactions}
+            categoryLookup={transactionCategoryLookup}
+            transactions={sortedVisibleTransactions}
             selectedTransaction={selectedTransaction}
-            onViewChange={setTransactionView}
-            onSelect={setSelectedTransactionId}
+            selectedTransactionCategories={selectedTransactionCategories}
+            onViewChange={handleTransactionViewChange}
+            onSelect={(transactionId) =>
+              setSelectedTransactionIds((current) => ({
+                ...current,
+                [transactionView]: transactionId
+              }))
+            }
             onAdd={handleTransactionAdd}
             onUpdate={handleTransactionUpdate}
             onDelete={handleTransactionDelete}
