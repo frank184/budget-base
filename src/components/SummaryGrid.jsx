@@ -6,24 +6,29 @@ function toneClass(value) {
 }
 
 export function SummaryGrid({ totals, formatCurrency }) {
+  const plannedEnd = totals.startingBalance + totals.plannedNet;
+  const actualEnd = totals.startingBalance + totals.actualNet;
+
   function plannedTone(row) {
-    return row.label === "Net" ? toneClass(row.planned) : "neutral";
+    return ["Income", "Expenses"].includes(row.label)
+      ? "neutral"
+      : toneClass(row.planned);
   }
 
   function actualTone(row) {
     if (row.label === "Income") {
-      if (row.actual === 0) return "neutral";
-      return row.actual >= row.planned ? "positive" : "neutral";
+      if (row.actual < row.planned) return "negative";
+      if (row.actual > row.planned) return "positive";
+      return "neutral";
     }
 
     if (row.label === "Expenses") {
-      if (row.actual === 0) return "neutral";
       if (row.actual > row.planned) return "negative";
       if (row.actual < row.planned) return "positive";
       return "neutral";
     }
 
-    return toneClass(row.actual);
+    return toneClass(row.actual)
   }
 
   const rows = [
@@ -58,6 +63,17 @@ export function SummaryGrid({ totals, formatCurrency }) {
         planned: "Budgeted income less planned spend.",
         actual: "Received income less actual spend.",
         diff: "Difference between actual net and planned net."
+      }
+    },
+    {
+      label: "Total",
+      planned: plannedEnd,
+      actual: actualEnd,
+      diff: actualEnd - plannedEnd,
+      help: {
+        planned: "Starting balance plus planned net.",
+        actual: "Starting balance plus actual net.",
+        diff: "Difference between actual and planned ending balance."
       }
     }
   ];

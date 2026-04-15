@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { STORAGE_KEY, THEME_KEY, createSampleState } from "./data/sampleState";
 import {
   addMonth,
+  getCategoryNameLookup,
   getCategories,
   getCurrentMonth,
   getMonthTotals,
@@ -34,36 +35,22 @@ export default function App() {
     () => getCategories(month, transactionView),
     [month, transactionView]
   );
-  const transactionCategoryLookup = useMemo(
-    () => ({
-      expense: Object.fromEntries(month.expenseCategories.map((category) => [category.id, category.name])),
-      income: Object.fromEntries(month.incomeCategories.map((category) => [category.id, category.name]))
-    }),
-    [month]
-  );
+  const transactionCategoryLookup = useMemo(() => getCategoryNameLookup(month), [month]);
   const transactions = useMemo(
     () => getTransactions(month, transactionView),
     [month, transactionView]
   );
-  const allTransactions = useMemo(() => {
-    const expense = month.expenseTransactions.map((transaction) => ({
-      ...transaction,
-      kind: "expense"
-    }));
-    const income = month.incomeTransactions.map((transaction) => ({
-      ...transaction,
-      kind: "income"
-    }));
-    return [...expense, ...income].sort((a, b) => b.date.localeCompare(a.date));
-  }, [month]);
-  const visibleTransactions = transactionView === "all" ? allTransactions : transactions;
+  const visibleTransactions = transactions;
   const sortedVisibleTransactions = useMemo(
     () => visibleTransactions.slice().sort((a, b) => b.date.localeCompare(a.date)),
     [visibleTransactions]
   );
   const currencyFormatter = useMemo(
-    () => (value) => formatCurrency(value, state.currency || "CAD"),
-    [state.currency]
+    () => (value) =>
+      formatCurrency(value, state.currency || "CAD", {
+        showCurrencyCode: state.showCurrencyCode ?? true
+      }),
+    [state.currency, state.showCurrencyCode]
   );
 
   useEffect(() => {
@@ -97,9 +84,9 @@ export default function App() {
   const selectedTransactionId = selectedTransactionIds[transactionView];
   const selectedTransaction =
     sortedVisibleTransactions.find((transaction) => transaction.id === selectedTransactionId) || null;
-  const selectedTransactionKind = selectedTransaction?.kind || transactionView;
+  const selectedTransactionKind = selectedTransaction?.type || transactionView;
   const selectedTransactionCategories =
-    selectedTransactionKind === "income" ? month.incomeCategories : month.expenseCategories;
+    getCategories(month, selectedTransactionKind === "all" ? "expense" : selectedTransactionKind);
 
   function patchMonth(recipe) {
     setState((current) => ({
@@ -148,11 +135,12 @@ export default function App() {
 
   function handleCategoryDelete(categoryId) {
     patchMonth((draft) => {
-      const categoriesKey = planView === "expense" ? "expenseCategories" : "incomeCategories";
-      const transactionsKey = planView === "expense" ? "expenseTransactions" : "incomeTransactions";
-      draft[categoriesKey] = draft[categoriesKey].filter((category) => category.id !== categoryId);
-      const fallbackId = draft[categoriesKey][0]?.id || "";
-      draft[transactionsKey] = draft[transactionsKey].map((transaction) =>
+      const remainingCategories = getCategories(draft, planView).filter(
+        (category) => category.id !== categoryId
+      );
+      const fallbackId = remainingCategories[0]?.id || "";
+      draft.categories = draft.categories.filter((category) => category.id !== categoryId);
+      draft.transactions = draft.transactions.map((transaction) =>
         transaction.categoryId === categoryId ? { ...transaction, categoryId: fallbackId } : transaction
       );
       return draft;
@@ -162,10 +150,11 @@ export default function App() {
   function handleCategoryAdd() {
     if (planView === "all") return;
     patchMonth((draft) => {
-      getCategories(draft, planView).push({
+      draft.categories.push({
         id: crypto.randomUUID(),
         name: planView === "expense" ? "New expense" : "New income",
-        planned: 0
+        planned: 0,
+        type: planView
       });
       return draft;
     });
@@ -173,13 +162,7 @@ export default function App() {
 
   function handleTransactionUpdate(transactionId, key, value) {
     patchMonth((draft) => {
-      const targetKind =
-        transactionView === "all"
-          ? draft.expenseTransactions.some((entry) => entry.id === transactionId)
-            ? "expense"
-            : "income"
-          : transactionView;
-      const transaction = getTransactions(draft, targetKind).find((entry) => entry.id === transactionId);
+      const transaction = draft.transactions.find((entry) => entry.id === transactionId);
       transaction[key] = key === "amount" ? toAmount(value) : value;
       return draft;
     });
@@ -194,11 +177,12 @@ export default function App() {
       date: new Date().toISOString().slice(0, 10),
       amount: 0,
       description: "",
-      categoryId: transactionCategories[0].id
+      categoryId: transactionCategories[0].id,
+      type: transactionView
     };
 
     patchMonth((draft) => {
-      getTransactions(draft, transactionView).unshift(transaction);
+      draft.transactions.unshift(transaction);
       return draft;
     });
     setSelectedTransactionIds((current) => ({
@@ -209,15 +193,7 @@ export default function App() {
 
   function handleTransactionDelete(transactionId) {
     patchMonth((draft) => {
-      const targetKind =
-        transactionView === "all"
-          ? draft.expenseTransactions.some((entry) => entry.id === transactionId)
-            ? "expense"
-            : "income"
-          : transactionView;
-      const target = getTransactions(draft, targetKind);
-      const index = target.findIndex((entry) => entry.id === transactionId);
-      if (index >= 0) target.splice(index, 1);
+      draft.transactions = draft.transactions.filter((entry) => entry.id !== transactionId);
       return draft;
     });
     setSelectedTransactionIds((current) => ({
@@ -230,13 +206,7 @@ export default function App() {
   }
 
   function handleTransactionViewChange(nextView) {
-    const nextTransactions =
-      nextView === "all"
-        ? allTransactions
-        : getTransactions(month, nextView).map((transaction) => ({
-            ...transaction,
-            kind: nextView
-          }));
+    const nextTransactions = getTransactions(month, nextView);
     const sortedNextTransactions = nextTransactions
       .slice()
       .sort((a, b) => b.date.localeCompare(a.date));
@@ -298,11 +268,18 @@ export default function App() {
       <TopBar
         theme={theme}
         currency={state.currency || "CAD"}
+        showCurrencyCode={state.showCurrencyCode ?? true}
         onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
         onCurrencyChange={(currency) =>
           setState((current) => ({
             ...current,
             currency
+          }))
+        }
+        onCurrencyCodeToggle={() =>
+          setState((current) => ({
+            ...current,
+            showCurrencyCode: !(current.showCurrencyCode ?? true)
           }))
         }
         onExport={handleExport}

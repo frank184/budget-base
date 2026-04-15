@@ -84,8 +84,10 @@ function ToolbarButton({ label, onClick, icon, title }) {
 export function TopBar({
   theme,
   currency,
+  showCurrencyCode,
   onThemeToggle,
   onCurrencyChange,
+  onCurrencyCodeToggle,
   onExport,
   onImport,
   onReset
@@ -102,9 +104,17 @@ export function TopBar({
       <div className="hero-actions">
         <label className="toolbar-field">
           <span className="toolbar-label">Currency</span>
-          <div className="toolbar-select-wrap">
+          <div
+            className="toolbar-select-wrap"
+            onDoubleClick={onCurrencyCodeToggle}
+            title={`Currency: ${currency}. Double-click to turn currency codes ${showCurrencyCode ? "off" : "on"}.`}
+          >
             <CurrencyIcon />
-            <select value={currency} onChange={(event) => onCurrencyChange(event.target.value)}>
+            <select
+              value={currency}
+              onChange={(event) => onCurrencyChange(event.target.value)}
+              title={`Currency: ${currency}. Double-click to turn currency codes ${showCurrencyCode ? "off" : "on"}.`}
+            >
               {CURRENCIES.map((code) => (
                 <option key={code} value={code}>
                   {code}

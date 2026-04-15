@@ -10,6 +10,8 @@
   --accent: #2f7a4a;
   --accent-soft: #e1efe3;
   --good: #2f7a4a;
+  --transaction-good: #4c8f63;
+  --transaction-good-soft: rgba(76, 143, 99, 0.12);
   --bad: #b05d54;
   --bad-soft: rgba(176, 93, 84, 0.12);
   --shadow: 0 12px 28px rgba(34, 62, 39, 0.08);
@@ -26,6 +28,8 @@
   --accent: #4da06b;
   --accent-soft: rgba(77, 160, 107, 0.16);
   --good: #6ec78f;
+  --transaction-good: #8ed5a5;
+  --transaction-good-soft: rgba(110, 199, 143, 0.12);
   --bad: #c46c61;
   --bad-soft: rgba(196, 108, 97, 0.14);
   --shadow: 0 12px 28px rgba(0, 0, 0, 0.3);
@@ -112,6 +116,14 @@ select {
   gap: 10px;
   flex-wrap: wrap;
   align-items: flex-end;
+}
+
+.panel-head .segmented {
+  gap: 10px;
+}
+
+.panel-head+.subhead {
+  margin-top: 8px;
 }
 
 .eyebrow,
@@ -244,6 +256,12 @@ h3 {
   border-color: transparent;
 }
 
+.month-banner .primary-button {
+  background: var(--accent-soft);
+  color: var(--good);
+  border-color: color-mix(in srgb, var(--good) 24%, var(--line));
+}
+
 .subtle-danger {
   color: var(--bad);
 }
@@ -323,7 +341,7 @@ h3 {
   padding-left: 24px;
 }
 
-.money-input-wrap .balance-input-negative + .money-input-prefix,
+.money-input-wrap .balance-input-negative+.money-input-prefix,
 .money-input-wrap:has(.balance-input-negative) .money-input-prefix {
   color: var(--bad);
 }
@@ -528,6 +546,60 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   padding-bottom: 8px;
 }
 
+.balance-flow {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.balance-flow-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.balance-flow-equation {
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.balance-flow-table {
+  margin-top: 4px;
+  table-layout: fixed;
+}
+
+.balance-flow-table thead th {
+  font-size: 0.68rem;
+}
+
+.balance-flow-table thead th:first-child,
+.balance-flow-table tbody th {
+  width: 34%;
+  text-align: left;
+}
+
+.balance-flow-table thead th.numeric,
+.balance-flow-table tbody td.numeric {
+  width: 33%;
+  text-align: right;
+}
+
+.balance-flow-table th[scope="row"] {
+  color: var(--text);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.balance-flow-table td,
+.balance-flow-table th {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
 .summary-help {
   cursor: help;
 }
@@ -542,7 +614,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .neutral {
   color: var(--text);
- }
+}
 
 .chart-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -605,6 +677,48 @@ table {
   table-layout: fixed;
 }
 
+.planner-table col.planner-col-category,
+.planner-table .planner-col-category,
+.planner-table tbody td:first-child {
+  width: 30%;
+}
+
+.planner-table col.planner-col-planned,
+.planner-table .planner-col-planned,
+.planner-table tbody td:nth-child(2) {
+  width: 26%;
+}
+
+.planner-table col.planner-col-actual,
+.planner-table .planner-col-actual,
+.planner-table tbody td:nth-child(3) {
+  width: 18%;
+}
+
+.planner-table col.planner-col-diff,
+.planner-table .planner-col-diff,
+.planner-table tbody td:nth-child(4) {
+  width: 16%;
+}
+
+.planner-table col.planner-col-actions,
+.planner-table .planner-col-actions,
+.planner-table tbody td:nth-child(5) {
+  width: 44px;
+}
+
+.planner-table tbody td:nth-child(5) {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.planner-table td.numeric,
+.planner-table th.numeric {
+  text-align: right;
+  padding-right: 10px;
+  white-space: nowrap;
+}
+
 th,
 td {
   padding: 6px 5px;
@@ -636,10 +750,10 @@ td.numeric {
 
 .row-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
 }
 
-.category-group + .category-group {
+.category-group+.category-group {
   margin-top: 12px;
 }
 
@@ -784,9 +898,9 @@ td.numeric {
 }
 
 .transaction-row-kind-income {
-  color: #8ed5a5;
-  border-color: color-mix(in srgb, var(--good) 35%, var(--line));
-  background: color-mix(in srgb, var(--good) 12%, transparent);
+  color: var(--transaction-good);
+  border-color: color-mix(in srgb, var(--transaction-good) 35%, var(--line));
+  background: var(--transaction-good-soft);
 }
 
 .transaction-row-amount {
@@ -800,7 +914,7 @@ td.numeric {
 }
 
 .transaction-row-amount-income {
-  color: #95dfae;
+  color: var(--transaction-good);
 }
 
 .category-dot {
@@ -815,7 +929,7 @@ td.numeric {
 }
 
 .category-dot-income {
-  background: color-mix(in srgb, var(--good) 80%, white 8%);
+  background: color-mix(in srgb, var(--transaction-good) 88%, white 6%);
 }
 
 .watch-item.over {
@@ -840,6 +954,10 @@ td.numeric {
 }
 
 .panel .subhead+.transaction-ledger {
+  margin-top: 8px;
+}
+
+.panel>div+.editor-fields {
   margin-top: 8px;
 }
 
@@ -870,6 +988,7 @@ td.numeric {
   border-color: color-mix(in srgb, var(--bad) 38%, var(--line));
   background: var(--bad-soft);
 }
+
 :root[data-theme="dark"] .balance-input-negative {
   color: var(--bad);
   border-color: color-mix(in srgb, var(--bad) 40%, var(--line));
@@ -911,5 +1030,10 @@ td.numeric {
 
   .toolbar-field {
     width: 100%;
+  }
+
+  .balance-flow-head {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

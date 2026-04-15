@@ -76,13 +76,13 @@ export function MonthBar({
         </label>
         <div className="mini-stats">
           <div className="mini-stat">
-            <div className="mini-stat-label">Planned End</div>
+            <div className="mini-stat-label">Planned Total</div>
             <div className={`mini-stat-value ${plannedEnd >= 0 ? "positive" : "negative"}`}>
               {formatCurrency(plannedEnd)}
             </div>
           </div>
           <div className="mini-stat">
-            <div className="mini-stat-label">Current End</div>
+            <div className="mini-stat-label">Current Total</div>
             <div className={`mini-stat-value ${currentEnd >= 0 ? "positive" : "negative"}`}>
               {formatCurrency(currentEnd)}
             </div>
@@ -90,7 +90,7 @@ export function MonthBar({
           <div className="mini-stat">
             <div className="mini-stat-label">Transactions</div>
             <div className="mini-stat-value">
-              {month.expenseTransactions.length + month.incomeTransactions.length}
+              {month.transactions.length}
             </div>
           </div>
         </div>

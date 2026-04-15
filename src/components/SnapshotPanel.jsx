@@ -1,4 +1,5 @@
 import React from "react";
+import { getCategories } from "../lib/budget";
 
 function isComparisonBad(row) {
   if (row.label === "Expenses") return row.actual > row.planned;
@@ -6,6 +7,7 @@ function isComparisonBad(row) {
 }
 
 export function SnapshotPanel({ month, totals, formatCurrency }) {
+  const expenseCategories = getCategories(month, "expense");
   const plannedEnd = month.startingBalance + totals.plannedNet;
   const actualEnd = month.startingBalance + totals.actualNet;
   const comparisonRows = [
@@ -23,7 +25,7 @@ export function SnapshotPanel({ month, totals, formatCurrency }) {
     1
   );
 
-  const breakdownRows = month.expenseCategories
+  const breakdownRows = expenseCategories
     .map((category) => ({
       name: category.name,
       planned: category.planned || 0,
@@ -35,7 +37,7 @@ export function SnapshotPanel({ month, totals, formatCurrency }) {
 
   const maxBreakdown = Math.max(...breakdownRows.map((row) => row.actual), 1);
 
-  const budgetWatchRows = month.expenseCategories
+  const budgetWatchRows = expenseCategories
     .map((category) => {
       const actual = totals.expenseActualByCategory[category.id] || 0;
       const planned = category.planned || 0;

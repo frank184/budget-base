@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { toAmount } from "../lib/format";
+import { getCategories } from "../lib/budget";
 
 export function PlannerPanel({
   view,
@@ -21,10 +22,10 @@ export function PlannerPanel({
 
   useEffect(() => {
     const nextDrafts = {};
-    month.expenseCategories.forEach((category) => {
+    getCategories(month, "expense").forEach((category) => {
       nextDrafts[category.id] = toAmount(category.planned).toFixed(2);
     });
-    month.incomeCategories.forEach((category) => {
+    getCategories(month, "income").forEach((category) => {
       nextDrafts[category.id] = toAmount(category.planned).toFixed(2);
     });
     setPlannedDrafts(nextDrafts);
@@ -42,31 +43,30 @@ export function PlannerPanel({
   const groupedCategories =
     view === "all"
       ? [
-          {
-            label: "Income",
-            type: "income",
-            items: month.incomeCategories
-          },
-          {
-            label: "Expenses",
-            type: "expense",
-            items: month.expenseCategories
-          }
-        ]
+        {
+          label: "Income",
+          type: "income",
+          items: getCategories(month, "income")
+        },
+        {
+          label: "Expenses",
+          type: "expense",
+          items: getCategories(month, "expense")
+        }
+      ]
       : [
-          {
-            label: view === "expense" ? "Expenses" : "Income",
-            type: view,
-            items: categories
-          }
-        ];
+        {
+          label: view === "expense" ? "Expenses" : "Income",
+          type: view,
+          items: categories
+        }
+      ];
 
   return (
     <section className="panel">
       <div className="panel-head">
         <div>
           <p className="section-label">Planning</p>
-          <h2>Categories</h2>
         </div>
         <div className="segmented">
           <button className={`segmented-button ${view === "all" ? "active" : ""}`} onClick={() => onViewChange("all")}>
@@ -101,14 +101,21 @@ export function PlannerPanel({
         return (
           <div className="category-group" key={group.label}>
             {view === "all" ? <div className="category-group-heading">{group.label}</div> : null}
-            <table>
+            <table className="planner-table">
+              <colgroup>
+                <col className="planner-col-category" />
+                <col className="planner-col-planned" />
+                <col className="planner-col-actual" />
+                <col className="planner-col-diff" />
+                <col className="planner-col-actions" />
+              </colgroup>
               <thead>
                 <tr>
-                  <th>Category</th>
-                  <th>Planned</th>
-                  <th>Actual</th>
-                  <th>Diff.</th>
-                  <th />
+                  <th className="planner-col-category">Category</th>
+                  <th className="planner-col-planned">Planned</th>
+                  <th className="planner-col-actual numeric">Actual</th>
+                  <th className="planner-col-diff numeric">Diff.</th>
+                  <th className="planner-col-actions" />
                 </tr>
               </thead>
               <tbody>

@@ -17,20 +17,20 @@ export function TransactionPanel({
   formatCurrency
 }) {
   const editorKind =
-    selectedTransaction?.kind || (view === "all" ? "expense" : view);
+    selectedTransaction?.type || (view === "all" ? "expense" : view);
   const [amountInput, setAmountInput] = useState(
     selectedTransaction ? toAmount(selectedTransaction.amount).toFixed(2) : "0.00"
   );
   const categoryOptions =
     selectedTransaction &&
-    !selectedTransactionCategories.some((category) => category.id === selectedTransaction.categoryId)
+      !selectedTransactionCategories.some((category) => category.id === selectedTransaction.categoryId)
       ? [
-          {
-            id: selectedTransaction.categoryId,
-            name: categoryLookup[editorKind]?.[selectedTransaction.categoryId] || "Unsorted"
-          },
-          ...selectedTransactionCategories
-        ]
+        {
+          id: selectedTransaction.categoryId,
+          name: categoryLookup[selectedTransaction.categoryId] || "Unsorted"
+        },
+        ...selectedTransactionCategories
+      ]
       : selectedTransactionCategories;
 
   useEffect(() => {
@@ -52,15 +52,14 @@ export function TransactionPanel({
         <div className="panel-head">
           <div>
             <p className="section-label">Reality</p>
-            <h2>Transaction Journal</h2>
           </div>
-        <div className="segmented">
-          <button className={`segmented-button ${view === "all" ? "active" : ""}`} onClick={() => onViewChange("all")}>
-            All
-          </button>
-          <button className={`segmented-button ${view === "expense" ? "active" : ""}`} onClick={() => onViewChange("expense")}>
-            Expenses
-          </button>
+          <div className="segmented">
+            <button className={`segmented-button ${view === "all" ? "active" : ""}`} onClick={() => onViewChange("all")}>
+              All
+            </button>
+            <button className={`segmented-button ${view === "expense" ? "active" : ""}`} onClick={() => onViewChange("expense")}>
+              Expenses
+            </button>
             <button className={`segmented-button ${view === "income" ? "active" : ""}`} onClick={() => onViewChange("income")}>
               Income
             </button>
@@ -82,31 +81,30 @@ export function TransactionPanel({
 
         <div className="transaction-list transaction-ledger">
           {transactions.map((transaction) => {
-              const kind = transaction.kind || view;
-              const categoryName =
-                categoryLookup[kind]?.[transaction.categoryId] || "Unsorted";
+            const type = transaction.type || view;
+            const categoryName = categoryLookup[transaction.categoryId] || "Unsorted";
 
-              return (
-                <button
-                  className={`transaction-row ${transaction.id === selectedTransaction?.id ? "active" : ""}`}
-                  key={transaction.id}
-                  onClick={() => onSelect(transaction.id)}
-                >
-                  <span className="transaction-row-date">{formatDate(transaction.date)}</span>
-                  <span className="transaction-row-desc">{transaction.description || "No description"}</span>
-                  <span className="transaction-row-category">
-                    <span className={`category-dot category-dot-${kind}`} />
-                    {categoryName}
-                  </span>
-                  <span className={`transaction-row-kind transaction-row-kind-${kind}`}>
-                    {kind === "income" ? "Income" : "Expense"}
-                  </span>
-                  <span className={`transaction-row-amount transaction-row-amount-${kind}`}>
-                    {formatCurrency(transaction.amount)}
-                  </span>
-                </button>
-              );
-            })}
+            return (
+              <button
+                className={`transaction-row ${transaction.id === selectedTransaction?.id ? "active" : ""}`}
+                key={transaction.id}
+                onClick={() => onSelect(transaction.id)}
+              >
+                <span className="transaction-row-date">{formatDate(transaction.date)}</span>
+                <span className="transaction-row-desc">{transaction.description || "No description"}</span>
+                <span className="transaction-row-category">
+                  <span className={`category-dot category-dot-${type}`} />
+                  {categoryName}
+                </span>
+                <span className={`transaction-row-kind transaction-row-kind-${type}`}>
+                  {type === "income" ? "Income" : "Expense"}
+                </span>
+                <span className={`transaction-row-amount transaction-row-amount-${type}`}>
+                  {formatCurrency(transaction.amount)}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </section>
 

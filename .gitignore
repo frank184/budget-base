@@ -1,2 +1,4 @@
+.vscode
+dist
 src/data/*
 !src/data/sampleState.js
