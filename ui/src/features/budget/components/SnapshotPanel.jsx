@@ -1,5 +1,5 @@
 import React from "react";
-import { getCategories } from "../lib/budget";
+import { getCategories } from "../model/budget";
 
 function isComparisonBad(row) {
   if (row.label === "Expenses") return row.actual > row.planned;
@@ -13,6 +13,7 @@ export function SnapshotPanel({ month, totals, formatCurrency }) {
   const comparisonRows = [
     { label: "Income", planned: totals.plannedIncome, actual: totals.actualIncome },
     { label: "Expenses", planned: totals.plannedExpenses, actual: totals.actualExpenses },
+    { label: "Net", planned: totals.plannedNet, actual: totals.actualNet },
     {
       label: "End Balance",
       planned: plannedEnd,
@@ -23,7 +24,7 @@ export function SnapshotPanel({ month, totals, formatCurrency }) {
   const maxComparison = Math.max(
     ...comparisonRows.flatMap((row) => [Math.abs(row.planned), Math.abs(row.actual)]),
     1
-  );
+  ) * 1.08;
 
   const breakdownRows = expenseCategories
     .map((category) => ({
@@ -31,27 +32,17 @@ export function SnapshotPanel({ month, totals, formatCurrency }) {
       planned: category.planned || 0,
       actual: totals.expenseActualByCategory[category.id] || 0
     }))
-    .filter((row) => row.actual > 0)
+    .map((row) => ({
+      ...row,
+      variance: row.actual - row.planned,
+      over: row.actual > row.planned && row.planned > 0
+    }))
+    .filter((row) => row.actual > 0 || row.planned > 0)
     .sort((a, b) => b.actual - a.actual)
     .slice(0, 6);
 
-  const maxBreakdown = Math.max(...breakdownRows.map((row) => row.actual), 1);
-
-  const budgetWatchRows = expenseCategories
-    .map((category) => {
-      const actual = totals.expenseActualByCategory[category.id] || 0;
-      const planned = category.planned || 0;
-      return {
-        name: category.name,
-        actual,
-        planned,
-        variance: actual - planned,
-        over: actual > planned && planned > 0
-      };
-    })
-    .filter((row) => row.actual > 0 || row.planned > 0)
-    .sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance))
-    .slice(0, 5);
+  const maxBreakdown =
+    Math.max(...breakdownRows.flatMap((row) => [row.planned, row.actual]), 1) * 1.05;
 
   return (
     <section className="panel">
@@ -92,37 +83,31 @@ export function SnapshotPanel({ month, totals, formatCurrency }) {
           <div className="breakdown-list">
             {breakdownRows.map((row) => (
               <div className="breakdown-item" key={row.name}>
-                <div className="breakdown-head">
+                <div className={`breakdown-head ${row.over ? "breakdown-head-over" : ""}`}>
                   <span className="breakdown-label">{row.name}</span>
-                  &nbsp;
-                  <span>{formatCurrency(row.actual)}</span>
-                </div>
-                <div className="bar-track">
-                  <div
-                    className={`bar-fill actual ${row.actual > row.planned ? "over" : ""}`}
-                    style={{ width: `${(row.actual / maxBreakdown) * 100}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="chart-card snapshot-status">
-          <h3>Budget Watch</h3>
-          <div className="watch-list">
-            {budgetWatchRows.map((row) => (
-              <div className={`watch-item ${row.over ? "over" : ""}`} key={row.name}>
-                <div className="watch-head">
-                  <span className="watch-title">{row.name}</span>
-                  <span className="watch-state">
-                    {row.over
-                      ? `Over by ${formatCurrency(row.variance)}`
-                      : `Remaining ${formatCurrency(Math.max(row.planned - row.actual, 0))}`}
+                  <span className="breakdown-metrics">
+                    <span>Plan {formatCurrency(row.planned)} / Actual {formatCurrency(row.actual)}</span>
                   </span>
                 </div>
-                <div className="watch-detail">
-                  Planned {formatCurrency(row.planned)} and actual {formatCurrency(row.actual)}
+                <div className="bar-track breakdown-track">
+                  <div
+                    className="bar-fill planned breakdown-planned"
+                    style={{ width: `${(row.planned / maxBreakdown) * 100}%` }}
+                  />
+                  {row.actual <= row.planned ? (
+                    <div
+                      className="bar-fill actual breakdown-actual-under"
+                      style={{ width: `${(row.actual / maxBreakdown) * 100}%` }}
+                    />
+                  ) : (
+                    <div
+                      className="bar-fill over breakdown-actual-over"
+                      style={{
+                        left: `calc(${(row.planned / maxBreakdown) * 100}% - 6px)`,
+                        width: `calc(${((row.actual - row.planned) / maxBreakdown) * 100}% + 6px)`
+                      }}
+                    />
+                  )}
                 </div>
               </div>
             ))}

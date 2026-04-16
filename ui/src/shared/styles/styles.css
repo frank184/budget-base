@@ -291,6 +291,7 @@ h3 {
   gap: 5px;
   overflow-x: auto;
   margin-top: 4px;
+  scroll-padding-inline: 24px;
 }
 
 .month-tab {
@@ -532,12 +533,18 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   align-content: start;
 }
 
+.side-column>.panel:first-child {
+  display: flex;
+  flex-direction: column;
+  max-height: 502px;
+}
+
 .summary-matrix-panel {
   padding-top: 8px;
 }
 
 .summary-matrix {
-  margin-top: 6px;
+  margin-top: 0;
   table-layout: fixed;
 }
 
@@ -665,11 +672,38 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .chart-row-head,
 .breakdown-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
   font-size: 0.74rem;
   color: var(--muted);
 }
 
+.breakdown-head> :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.breakdown-head> :last-child {
+  flex: 0 0 auto;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.breakdown-metrics {
+  display: inline-flex;
+  gap: 0;
+  align-items: baseline;
+}
+
+.breakdown-head-over .breakdown-label,
+.breakdown-head-over .breakdown-metrics {
+  color: var(--bad);
+}
+
 .bar-track {
+  position: relative;
   overflow: hidden;
   height: 8px;
   border-radius: 999px;
@@ -691,6 +725,29 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .bar-fill.over {
   background: var(--bad);
+}
+
+.breakdown-track .bar-fill {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+}
+
+.breakdown-planned {
+  background: color-mix(in srgb, var(--good) 24%, white 30%);
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--good) 58%, var(--line));
+  opacity: 0.95;
+  z-index: 3;
+}
+
+.breakdown-actual-under {
+  background: var(--good);
+  z-index: 4;
+}
+
+.breakdown-actual-over {
+  z-index: 2;
 }
 
 table {
@@ -883,7 +940,9 @@ td.numeric {
 
 .transaction-ledger {
   gap: 0;
-  max-height: 360px;
+  flex: 1 1 auto;
+  max-height: 410px;
+  overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-strong);

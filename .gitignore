@@ -1,5 +1,4 @@
 .vscode
 dist
 node_modules
-src/data/*
-!src/data/sampleState.js
+privateState.json

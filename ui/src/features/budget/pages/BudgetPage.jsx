@@ -1,23 +1,32 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { STORAGE_KEY, THEME_KEY, createSampleState } from "./data/sampleState";
+
+import { MonthBar } from "../components/MonthBar";
+import { PlannerPanel } from "../components/PlannerPanel";
+import { SnapshotPanel } from "../components/SnapshotPanel";
+import { SummaryGrid } from "../components/SummaryGrid";
+import { TopBar } from "../components/TopBar";
+import { TransactionPanel } from "../components/TransactionPanel";
 import {
   addMonth,
-  getCategoryNameLookup,
   getCategories,
+  getCategoryNameLookup,
   getCurrentMonth,
   getMonthTotals,
   getTransactions,
-  loadBudgetState
-} from "./lib/budget";
-import { formatCurrency, formatDate, toAmount } from "./lib/format";
-import { TopBar } from "./components/TopBar";
-import { MonthBar } from "./components/MonthBar";
-import { SummaryGrid } from "./components/SummaryGrid";
-import { SnapshotPanel } from "./components/SnapshotPanel";
-import { PlannerPanel } from "./components/PlannerPanel";
-import { TransactionPanel } from "./components/TransactionPanel";
+  loadBudgetState,
+  normalizeBudgetState,
+  patchCurrentMonth
+} from "../model/budget";
+import { createSampleState, STORAGE_KEY, THEME_KEY } from "../model/sampleState";
+import { formatCurrency, formatDate, toAmount } from "../../../shared/lib/format";
 
-export default function App() {
+function syncFavicon(theme) {
+  const favicon = document.getElementById("app-favicon");
+  if (!favicon) return;
+  favicon.setAttribute("href", theme === "dark" ? "/favicon-dark.svg" : "/favicon-light.svg");
+}
+
+export function BudgetPage() {
   const [state, setState] = useState(() => loadBudgetState(STORAGE_KEY));
   const [planView, setPlanView] = useState("expense");
   const [transactionView, setTransactionView] = useState("all");
@@ -40,10 +49,9 @@ export default function App() {
     () => getTransactions(month, transactionView),
     [month, transactionView]
   );
-  const visibleTransactions = transactions;
   const sortedVisibleTransactions = useMemo(
-    () => visibleTransactions.slice().sort((a, b) => b.date.localeCompare(a.date)),
-    [visibleTransactions]
+    () => transactions.slice().sort((a, b) => b.date.localeCompare(a.date)),
+    [transactions]
   );
   const currencyFormatter = useMemo(
     () => (value) =>
@@ -60,6 +68,7 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(THEME_KEY, theme);
     document.documentElement.dataset.theme = theme;
+    syncFavicon(theme);
   }, [theme]);
 
   useEffect(() => {
@@ -73,6 +82,7 @@ export default function App() {
 
     const selectedTransactionId = selectedTransactionIds[transactionView];
     const exists = sortedVisibleTransactions.some((transaction) => transaction.id === selectedTransactionId);
+
     if (!exists) {
       setSelectedTransactionIds((current) => ({
         ...current,
@@ -85,16 +95,13 @@ export default function App() {
   const selectedTransaction =
     sortedVisibleTransactions.find((transaction) => transaction.id === selectedTransactionId) || null;
   const selectedTransactionKind = selectedTransaction?.type || transactionView;
-  const selectedTransactionCategories =
-    getCategories(month, selectedTransactionKind === "all" ? "expense" : selectedTransactionKind);
+  const selectedTransactionCategories = getCategories(
+    month,
+    selectedTransactionKind === "all" ? "expense" : selectedTransactionKind
+  );
 
   function patchMonth(recipe) {
-    setState((current) => ({
-      ...current,
-      months: current.months.map((entry) =>
-        entry.id === current.selectedMonthId ? recipe(structuredClone(entry)) : entry
-      )
-    }));
+    setState((current) => patchCurrentMonth(current, recipe));
   }
 
   function handleMonthSelect(monthId) {
@@ -113,11 +120,28 @@ export default function App() {
     const index = ordered.findIndex((entry) => entry.id === state.selectedMonthId);
     const fallback = ordered[index - 1] || ordered[index + 1];
 
-    setState((current) => ({
-      ...current,
-      selectedMonthId: fallback.id,
-      months: current.months.filter((entry) => entry.id !== current.selectedMonthId)
-    }));
+    setState((current) => {
+      const nextMonths = current.months.filter((entry) => entry.id !== current.selectedMonthId);
+      const nextCategoryLinks = current.categoryLinks.filter(
+        (link) => link.monthId !== current.selectedMonthId
+      );
+      const nextTransactions = current.transactions.filter(
+        (transaction) => transaction.monthKey !== month.monthKey
+      );
+      const referencedCategoryIds = new Set([
+        ...nextCategoryLinks.map((link) => link.categoryId),
+        ...nextTransactions.map((transaction) => transaction.categoryId)
+      ]);
+
+      return {
+        ...current,
+        selectedMonthId: fallback.id,
+        months: nextMonths,
+        categories: current.categories.filter((category) => referencedCategoryIds.has(category.id)),
+        categoryLinks: nextCategoryLinks,
+        transactions: nextTransactions
+      };
+    });
     setSelectedTransactionIds({
       all: null,
       expense: null,
@@ -149,6 +173,7 @@ export default function App() {
 
   function handleCategoryAdd() {
     if (planView === "all") return;
+
     patchMonth((draft) => {
       draft.categories.push({
         id: crypto.randomUUID(),
@@ -265,15 +290,17 @@ export default function App() {
   function handleImport(event) {
     const file = event.target.files?.[0];
     if (!file) return;
+
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const parsed = JSON.parse(String(reader.result));
-        if (!parsed.months?.length) throw new Error("Imported file does not contain any months.");
-        setState({
-          ...parsed,
-          selectedMonthId: parsed.selectedMonthId || parsed.months[0].id
-        });
+
+        if (!parsed.months?.length) {
+          throw new Error("Imported file does not contain any months.");
+        }
+
+        setState(normalizeBudgetState(parsed));
         setSelectedTransactionIds({
           all: null,
           expense: null,
@@ -310,7 +337,7 @@ export default function App() {
         onExport={handleExport}
         onImport={handleImport}
         onReset={() => {
-          setState(createSampleState());
+          setState(normalizeBudgetState(createSampleState()));
           setSelectedTransactionIds({
             all: null,
             expense: null,

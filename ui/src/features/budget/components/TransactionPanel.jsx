@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { toAmount } from "../lib/format";
+import { toAmount } from "../../../shared/lib/format";
 
 export function TransactionPanel({
   view,

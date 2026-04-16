@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { toAmount } from "../lib/format";
-import { getCategories } from "../lib/budget";
+import { getCategories } from "../model/budget";
+import { toAmount } from "../../../shared/lib/format";
 
 export function PlannerPanel({
   view,
@@ -17,6 +17,11 @@ export function PlannerPanel({
   function toneClass(value) {
     if (value === 0) return "neutral";
     return value > 0 ? "positive" : "negative";
+  }
+
+  function toneClassActual(actual, planned) {
+    if (actual - planned === 0) return "neutral";
+    return actual < planned ? "positive" : "negative";
   }
 
   const [plannedDrafts, setPlannedDrafts] = useState({});
@@ -204,7 +209,7 @@ export function PlannerPanel({
                           />
                         </span>
                       </td>
-                      <td className={`numeric ${toneClass(actual)}`}>{formatCurrency(actual)}</td>
+                      <td className={`numeric ${toneClassActual(actual, category.planned)}`}>{formatCurrency(actual)}</td>
                       <td className={`numeric ${toneClass(diff)}`}>{formatCurrency(diff)}</td>
                       <td className="row-actions">
                         <button className="icon-button" onClick={() => onDelete(category.id)} disabled={view === "all"}>
