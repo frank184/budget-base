@@ -1,12 +1,96 @@
 import { createSampleState } from "./sampleState.js";
 import { toAmount } from "../../../shared/lib/format.js";
 
+function parseMonthId(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return null;
+  }
+
+  return { year, month };
+}
+
+function buildMonthDate(year, month, day, hours, minutes, seconds, milliseconds) {
+  return new Date(Date.UTC(year, month - 1, day, hours, minutes, seconds, milliseconds)).toISOString();
+}
+
+function getMonthIdFromDateLike(value) {
+  if (!value) return "";
+
+  if (typeof value === "string" && /^\d{4}-\d{2}/.test(value)) {
+    return value.slice(0, 7);
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  return `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function getStartAtForMonth(monthId) {
+  const parsed = parseMonthId(monthId);
+  if (!parsed) return buildMonthDate(1970, 1, 1, 0, 0, 0, 0);
+  return buildMonthDate(parsed.year, parsed.month, 1, 0, 0, 0, 0);
+}
+
+function getEndAtForMonth(monthId) {
+  const parsed = parseMonthId(monthId);
+  if (!parsed) return buildMonthDate(1970, 1, 31, 23, 59, 59, 999);
+  const lastDay = new Date(Date.UTC(parsed.year, parsed.month, 0)).getUTCDate();
+  return buildMonthDate(parsed.year, parsed.month, lastDay, 23, 59, 59, 999);
+}
+
+function formatMonthName(monthId) {
+  const parsed = parseMonthId(monthId);
+  if (!parsed) return monthId;
+
+  return new Date(Date.UTC(parsed.year, parsed.month - 1, 1)).toLocaleDateString(undefined, {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC"
+  });
+}
+
+function normalizeBoundary(value, monthId, boundary) {
+  if (typeof value === "string" && value.includes("T")) {
+    return value;
+  }
+
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return `${value}${boundary === "start" ? "T00:00:00.000Z" : "T23:59:59.999Z"}`;
+  }
+
+  return boundary === "start" ? getStartAtForMonth(monthId) : getEndAtForMonth(monthId);
+}
+
+function normalizeOccurredAt(value, fallbackMonthId) {
+  if (typeof value === "string" && value.includes("T")) {
+    return value;
+  }
+
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return `${value}T12:00:00.000Z`;
+  }
+
+  if (fallbackMonthId) {
+    return `${fallbackMonthId}-01T12:00:00.000Z`;
+  }
+
+  return "1970-01-01T12:00:00.000Z";
+}
+
 function hasLinkStateShape(state) {
   return (
     Array.isArray(state?.months) &&
     Array.isArray(state?.categories) &&
-    Array.isArray(state?.categoryLinks) &&
-    Array.isArray(state?.transactions)
+    (Array.isArray(state?.categoryPlans) || Array.isArray(state?.categoryLinks))
   );
 }
 
@@ -22,11 +106,6 @@ function hasNormalizedMonthShape(month) {
   return Array.isArray(month?.categories) && Array.isArray(month?.transactions);
 }
 
-function getMonthKeyFromDate(date) {
-  if (!date) return "";
-  return String(date).slice(0, 7);
-}
-
 function slugify(value) {
   return String(value || "")
     .toLowerCase()
@@ -35,12 +114,20 @@ function slugify(value) {
     .replaceAll(/^-+|-+$/g, "");
 }
 
+function findMonthIdForOccurredAt(months, occurredAt) {
+  return months.find((month) => occurredAt >= month.startAt && occurredAt <= month.endAt)?.id || "";
+}
+
 function normalizeMonthRecord(month) {
+  const inferredId =
+    String(month?.id || month?.monthKey || getMonthIdFromDateLike(month?.startAt || month?.startDate) || "");
+
   return {
-    id: String(month.id),
-    monthKey: month.monthKey || String(month.id),
-    name: month.name,
-    startingBalance: toAmount(month.startingBalance)
+    id: inferredId,
+    startAt: normalizeBoundary(month?.startAt || month?.startDate, inferredId, "start"),
+    endAt: normalizeBoundary(month?.endAt || month?.endDate, inferredId, "end"),
+    name: month?.name || formatMonthName(inferredId),
+    startingBalance: toAmount(month?.startingBalance)
   };
 }
 
@@ -52,9 +139,9 @@ function normalizeCategoryDefinition(category) {
   };
 }
 
-function normalizeCategoryLink(link) {
+function normalizeCategoryPlan(link) {
   return {
-    id: String(link.id),
+    id: String(link.id || `${link.monthId}:${link.categoryId}`),
     monthId: String(link.monthId),
     categoryId: String(link.categoryId),
     planned: toAmount(link.planned),
@@ -62,14 +149,27 @@ function normalizeCategoryLink(link) {
   };
 }
 
-function normalizeFlatTransaction(transaction) {
+function normalizeTransactionRecord(transaction, months, fallbackMonthId) {
+  const occurredAt = normalizeOccurredAt(
+    transaction?.occurredAt || transaction?.date || transaction?.occurredOn,
+    fallbackMonthId || String(transaction?.monthId || transaction?.monthKey || "")
+  );
+  const monthId =
+    String(transaction?.monthId || "") ||
+    findMonthIdForOccurredAt(months, occurredAt) ||
+    String(transaction?.monthKey || getMonthIdFromDateLike(occurredAt) || fallbackMonthId || "");
+
   return {
-    ...transaction,
     id: String(transaction.id),
-    categoryId: String(transaction.categoryId),
+    occurredAt,
+    date: occurredAt.slice(0, 10),
     amount: toAmount(transaction.amount),
+    description: transaction.description || "",
+    categoryId: String(transaction.categoryId),
     type: transaction.type || "expense",
-    monthKey: transaction.monthKey || getMonthKeyFromDate(transaction.date)
+    monthId,
+    createdAt: transaction.createdAt || undefined,
+    updatedAt: transaction.updatedAt || undefined
   };
 }
 
@@ -114,7 +214,7 @@ function buildCanonicalCategoryRegistry() {
 
 function flattenMonth(month, registry) {
   const monthRecord = normalizeMonthRecord(month);
-  const categoryLinks = [];
+  const categoryPlans = [];
 
   const normalizedCategories = hasNormalizedMonthShape(month)
     ? month.categories.map((category) => ({
@@ -128,7 +228,7 @@ function flattenMonth(month, registry) {
 
   normalizedCategories.forEach((category, index) => {
     const definition = registry.register(category, category.type);
-    categoryLinks.push({
+    categoryPlans.push({
       id: `${monthRecord.id}:${definition.id}`,
       monthId: monthRecord.id,
       categoryId: definition.id,
@@ -165,20 +265,19 @@ function flattenMonth(month, registry) {
           transaction.type
         );
 
-    return {
-      id: String(transaction.id),
-      date: transaction.date,
-      amount: toAmount(transaction.amount),
-      description: transaction.description,
-      categoryId: definition.id,
-      type: transaction.type || "expense",
-      monthKey: monthRecord.monthKey
-    };
+    return normalizeTransactionRecord(
+      {
+        ...transaction,
+        categoryId: definition.id
+      },
+      [monthRecord],
+      monthRecord.id
+    );
   });
 
   return {
     month: monthRecord,
-    categoryLinks,
+    categoryPlans,
     transactions
   };
 }
@@ -187,8 +286,7 @@ function convertLegacyFlatState(state) {
   const registry = buildCanonicalCategoryRegistry();
   const months = state.months.map(normalizeMonthRecord);
   const monthIds = new Set(months.map((month) => month.id));
-  const monthKeys = new Set(months.map((month) => month.monthKey));
-  const categoryLinks = [];
+  const categoryPlans = [];
 
   (state.categories || []).forEach((category, index) => {
     if (!monthIds.has(String(category.monthId))) {
@@ -196,7 +294,7 @@ function convertLegacyFlatState(state) {
     }
 
     const definition = registry.register(category, category.type);
-    categoryLinks.push({
+    categoryPlans.push({
       id: `${category.monthId}:${definition.id}`,
       monthId: String(category.monthId),
       categoryId: definition.id,
@@ -206,8 +304,8 @@ function convertLegacyFlatState(state) {
   });
 
   const transactions = (state.transactions || [])
-    .map(normalizeFlatTransaction)
-    .filter((transaction) => monthKeys.has(transaction.monthKey))
+    .map((transaction) => normalizeTransactionRecord(transaction, months))
+    .filter((transaction) => monthIds.has(transaction.monthId))
     .map((transaction) => {
       const matchingLegacyCategory = (state.categories || []).find(
         (category) =>
@@ -239,15 +337,12 @@ function convertLegacyFlatState(state) {
     });
 
   return {
+    id: state.id,
+    name: state.name,
     currency: state.currency || "CAD",
-    showCurrencyCode: state.showCurrencyCode ?? true,
-    selectedMonthId:
-      state.selectedMonthId && monthIds.has(state.selectedMonthId)
-        ? state.selectedMonthId
-        : months[0]?.id,
     months,
     categories: registry.categories.map(normalizeCategoryDefinition),
-    categoryLinks,
+    categoryPlans,
     transactions
   };
 }
@@ -258,28 +353,33 @@ export function normalizeBudgetState(state) {
   }
 
   if (hasLinkStateShape(state)) {
-    const months = state.months.map(normalizeMonthRecord);
+    const months = (state.months || []).map(normalizeMonthRecord);
     const monthIds = new Set(months.map((month) => month.id));
-    const monthKeys = new Set(months.map((month) => month.monthKey));
     const categories = (state.categories || []).map(normalizeCategoryDefinition);
     const categoryIds = new Set(categories.map((category) => category.id));
+    const rawCategoryPlans = state.categoryPlans || state.categoryLinks || [];
+    const rawTransactions =
+      state.transactions?.length
+        ? state.transactions
+        : state.months.flatMap((month) =>
+            (month.transactions || []).map((transaction) => ({
+              ...transaction,
+              monthId: month.id
+            }))
+          );
 
     return {
-      ...state,
+      id: state.id,
+      name: state.name,
       currency: state.currency || "CAD",
-      showCurrencyCode: state.showCurrencyCode ?? true,
-      selectedMonthId:
-        state.selectedMonthId && monthIds.has(state.selectedMonthId)
-          ? state.selectedMonthId
-          : months[0]?.id,
       months,
       categories,
-      categoryLinks: (state.categoryLinks || [])
-        .map(normalizeCategoryLink)
+      categoryPlans: rawCategoryPlans
+        .map(normalizeCategoryPlan)
         .filter((link) => monthIds.has(link.monthId) && categoryIds.has(link.categoryId)),
-      transactions: (state.transactions || [])
-        .map(normalizeFlatTransaction)
-        .filter((transaction) => monthKeys.has(transaction.monthKey) && categoryIds.has(transaction.categoryId))
+      transactions: (rawTransactions || [])
+        .map((transaction) => normalizeTransactionRecord(transaction, months))
+        .filter((transaction) => monthIds.has(transaction.monthId) && categoryIds.has(transaction.categoryId))
     };
   }
 
@@ -289,36 +389,23 @@ export function normalizeBudgetState(state) {
 
   const registry = buildCanonicalCategoryRegistry();
   const flattened = state.months.map((month) => flattenMonth(month, registry));
+  const months = flattened.map((entry) => entry.month);
 
   return {
+    id: state.id,
+    name: state.name,
     currency: state.currency || "CAD",
-    showCurrencyCode: state.showCurrencyCode ?? true,
-    selectedMonthId: state.selectedMonthId || flattened[0]?.month.id,
-    months: flattened.map((entry) => entry.month),
+    months,
     categories: registry.categories.map(normalizeCategoryDefinition),
-    categoryLinks: flattened.flatMap((entry) => entry.categoryLinks),
+    categoryPlans: flattened.flatMap((entry) => entry.categoryPlans),
     transactions: flattened.flatMap((entry) => entry.transactions)
   };
 }
 
-export function loadBudgetState(key) {
-  const raw = localStorage.getItem(key);
-  if (!raw) return normalizeBudgetState(createSampleState());
-
-  try {
-    const parsed = JSON.parse(raw);
-    return normalizeBudgetState(parsed);
-  } catch {
-    return normalizeBudgetState(createSampleState());
-  }
-}
-
 function hydrateMonth(state, month) {
-  const categoryById = Object.fromEntries(
-    state.categories.map((category) => [category.id, category])
-  );
+  const categoryById = Object.fromEntries(state.categories.map((category) => [category.id, category]));
 
-  const categories = state.categoryLinks
+  const categories = state.categoryPlans
     .filter((link) => link.monthId === month.id)
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((link) => {
@@ -337,13 +424,29 @@ function hydrateMonth(state, month) {
 
   return {
     ...month,
+    monthKey: month.id,
     categories,
-    transactions: state.transactions.filter((transaction) => transaction.monthKey === month.monthKey)
+    transactions: state.transactions
+      .filter((transaction) => transaction.monthId === month.id)
+      .map((transaction) => ({
+        ...transaction,
+        date: transaction.occurredAt.slice(0, 10)
+      }))
   };
 }
 
-export function getCurrentMonth(state) {
-  const month = state.months.find((entry) => entry.id === state.selectedMonthId) || state.months[0];
+export function getSelectedMonthId(state, preferredMonthId) {
+  if (!state?.months?.length) return "";
+  if (preferredMonthId && state.months.some((month) => month.id === preferredMonthId)) {
+    return preferredMonthId;
+  }
+
+  return state.months[0].id;
+}
+
+export function getCurrentMonth(state, selectedMonthId) {
+  const resolvedMonthId = getSelectedMonthId(state, selectedMonthId);
+  const month = state.months.find((entry) => entry.id === resolvedMonthId) || state.months[0];
   return hydrateMonth(state, month);
 }
 
@@ -409,12 +512,12 @@ export function getMonthTotals(month) {
   };
 }
 
-export function patchCurrentMonth(state, recipe) {
-  const currentMonth = getCurrentMonth(state);
+export function patchCurrentMonth(state, selectedMonthId, recipe) {
+  const currentMonth = getCurrentMonth(state, selectedMonthId);
   const draft = structuredClone(currentMonth);
   const nextMonth = recipe(draft) || draft;
 
-  const nextCategories = [];
+  const nextCategoryPlans = [];
   const upsertedCategories = new Map(state.categories.map((category) => [category.id, category]));
 
   (nextMonth.categories || []).forEach((category, index) => {
@@ -425,7 +528,7 @@ export function patchCurrentMonth(state, recipe) {
       type: category.type || "expense"
     });
 
-    nextCategories.push({
+    nextCategoryPlans.push({
       id: `${currentMonth.id}:${canonicalId}`,
       monthId: currentMonth.id,
       categoryId: canonicalId,
@@ -435,24 +538,35 @@ export function patchCurrentMonth(state, recipe) {
   });
 
   const nextTransactions = [
-    ...state.transactions.filter((transaction) => transaction.monthKey !== currentMonth.monthKey),
-    ...(nextMonth.transactions || []).map((transaction) => ({
-      ...transaction,
-      id: String(transaction.id),
-      categoryId: String(transaction.categoryId),
-      amount: toAmount(transaction.amount),
-      type: transaction.type || "expense",
-      monthKey: getMonthKeyFromDate(transaction.date)
-    }))
+    ...state.transactions.filter((transaction) => transaction.monthId !== currentMonth.id),
+    ...(nextMonth.transactions || []).map((transaction) => {
+      const occurredAt = normalizeOccurredAt(
+        transaction.occurredAt || transaction.date,
+        currentMonth.id
+      );
+
+      return {
+        id: String(transaction.id),
+        occurredAt,
+        date: occurredAt.slice(0, 10),
+        amount: toAmount(transaction.amount),
+        description: transaction.description || "",
+        categoryId: String(transaction.categoryId),
+        type: transaction.type || "expense",
+        monthId: findMonthIdForOccurredAt(state.months, occurredAt) || currentMonth.id,
+        createdAt: transaction.createdAt || undefined,
+        updatedAt: transaction.updatedAt || undefined
+      };
+    })
   ];
 
-  const categoryLinks = [
-    ...state.categoryLinks.filter((link) => link.monthId !== currentMonth.id),
-    ...nextCategories
+  const categoryPlans = [
+    ...state.categoryPlans.filter((link) => link.monthId !== currentMonth.id),
+    ...nextCategoryPlans
   ];
 
   const referencedCategoryIds = new Set([
-    ...categoryLinks.map((link) => link.categoryId),
+    ...categoryPlans.map((link) => link.categoryId),
     ...nextTransactions.map((transaction) => transaction.categoryId)
   ]);
 
@@ -462,9 +576,9 @@ export function patchCurrentMonth(state, recipe) {
       entry.id === currentMonth.id
         ? {
             ...entry,
-            id: currentMonth.id,
-            monthKey: entry.monthKey,
             name: nextMonth.name,
+            startAt: nextMonth.startAt,
+            endAt: nextMonth.endAt,
             startingBalance: toAmount(nextMonth.startingBalance)
           }
         : entry
@@ -472,24 +586,26 @@ export function patchCurrentMonth(state, recipe) {
     categories: Array.from(upsertedCategories.values()).filter((category) =>
       referencedCategoryIds.has(category.id)
     ),
-    categoryLinks,
+    categoryPlans,
     transactions: nextTransactions
   };
 }
 
-export function addMonth(state) {
+export function addMonth(state, selectedMonthId) {
   const sortedMonths = state.months.slice().sort((a, b) => a.id.localeCompare(b.id));
-  const [year, month] = sortedMonths[sortedMonths.length - 1].id.split("-").map(Number);
-  const baseDate = new Date(year, month - 1, 1);
-  baseDate.setMonth(baseDate.getMonth() + 1);
-
-  const source = getCurrentMonth(state);
+  const source = getCurrentMonth(state, selectedMonthId);
   const totals = getMonthTotals(source);
-  const newMonthId = `${baseDate.getFullYear()}-${String(baseDate.getMonth() + 1).padStart(2, "0")}`;
+  const lastMonthId = sortedMonths[sortedMonths.length - 1]?.id || source.id;
+  const parsed = parseMonthId(lastMonthId);
+  const nextDate = new Date(Date.UTC(parsed.year, parsed.month - 1, 1));
+  nextDate.setUTCMonth(nextDate.getUTCMonth() + 1);
+
+  const newMonthId = `${nextDate.getUTCFullYear()}-${String(nextDate.getUTCMonth() + 1).padStart(2, "0")}`;
   const newMonth = {
     id: newMonthId,
-    monthKey: newMonthId,
-    name: baseDate.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
+    startAt: getStartAtForMonth(newMonthId),
+    endAt: getEndAtForMonth(newMonthId),
+    name: formatMonthName(newMonthId),
     startingBalance: source.startingBalance + totals.actualNet
   };
 
@@ -503,8 +619,57 @@ export function addMonth(state) {
 
   return {
     ...state,
-    selectedMonthId: newMonth.id,
     months: [...state.months, newMonth],
-    categoryLinks: [...state.categoryLinks, ...newLinks]
+    categoryPlans: [...state.categoryPlans, ...newLinks]
   };
+}
+
+export function toBudgetMutationInput(state) {
+  return {
+    id: state.id,
+    name: state.name,
+    currency: state.currency || "CAD",
+    months: state.months.map((month) => ({
+      id: month.id,
+      startAt: month.startAt,
+      endAt: month.endAt,
+      name: month.name,
+      startingBalance: toAmount(month.startingBalance)
+    })),
+    categories: state.categories.map((category) => ({
+      id: category.id,
+      name: category.name,
+      type: category.type
+    })),
+    categoryPlans: state.categoryPlans
+      .slice()
+      .sort((a, b) => {
+        if (a.monthId === b.monthId) {
+          return a.sortOrder - b.sortOrder;
+        }
+
+        return a.monthId.localeCompare(b.monthId);
+      })
+      .map((link) => ({
+        id: link.id,
+        monthId: link.monthId,
+        categoryId: link.categoryId,
+        planned: toAmount(link.planned),
+        sortOrder: link.sortOrder
+      })),
+    transactions: state.transactions.map((transaction) => ({
+      id: transaction.id,
+      occurredAt: transaction.occurredAt,
+      amount: toAmount(transaction.amount),
+      description: transaction.description || "",
+      categoryId: transaction.categoryId,
+      type: transaction.type,
+      createdAt: transaction.createdAt,
+      updatedAt: transaction.updatedAt
+    }))
+  };
+}
+
+export function serializeBudgetState(state) {
+  return JSON.stringify(toBudgetMutationInput(state), null, 2);
 }

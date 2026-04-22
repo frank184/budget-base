@@ -1,4 +1,5 @@
-export const STORAGE_KEY = "budget-base-v2";
+export const SELECTED_MONTH_KEY = "budget-base-selected-month";
+export const SHOW_CURRENCY_CODE_KEY = "budget-base-show-currency-code";
 export const THEME_KEY = "budget-base-theme";
 
 function month({ id, name, startingBalance }) {

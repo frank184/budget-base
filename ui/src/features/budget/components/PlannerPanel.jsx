@@ -25,18 +25,23 @@ export function PlannerPanel({
   }
 
   const [plannedDrafts, setPlannedDrafts] = useState({});
+  const [nameDrafts, setNameDrafts] = useState({});
   const [draggedCategoryId, setDraggedCategoryId] = useState(null);
   const [dragOverCategoryId, setDragOverCategoryId] = useState(null);
 
   useEffect(() => {
     const nextDrafts = {};
+    const nextNameDrafts = {};
     getCategories(month, "expense").forEach((category) => {
       nextDrafts[category.id] = toAmount(category.planned).toFixed(2);
+      nextNameDrafts[category.id] = category.name;
     });
     getCategories(month, "income").forEach((category) => {
       nextDrafts[category.id] = toAmount(category.planned).toFixed(2);
+      nextNameDrafts[category.id] = category.name;
     });
     setPlannedDrafts(nextDrafts);
+    setNameDrafts(nextNameDrafts);
   }, [month]);
 
   function commitPlannedValue(categoryId, value) {
@@ -186,8 +191,14 @@ export function PlannerPanel({
                       </td>
                       <td>
                         <input
-                          value={category.name}
-                          onChange={(event) => onUpdate(category.id, "name", event.target.value)}
+                          value={nameDrafts[category.id] ?? category.name}
+                          onChange={(event) =>
+                            setNameDrafts((current) => ({
+                              ...current,
+                              [category.id]: event.target.value
+                            }))
+                          }
+                          onBlur={(event) => onUpdate(category.id, "name", event.target.value)}
                         />
                       </td>
                       <td>

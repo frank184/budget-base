@@ -15,7 +15,8 @@ export function MonthBar({
   onMonthSelect,
   onMonthAdd,
   onMonthRemove,
-  onStartingBalanceChange
+  onStartingBalanceChange,
+  disabled = false
 }) {
   const orderedMonths = state.months.slice().sort((a, b) => a.id.localeCompare(b.id));
   const plannedTotal = month.startingBalance + totals.plannedNet;
@@ -133,12 +134,11 @@ export function MonthBar({
         </div>
 
         <div className="banner-actions">
-
-          <button className="primary-button" onClick={onMonthAdd}>
+          <button className="primary-button" onClick={onMonthAdd} disabled={disabled}>
             Add Month
           </button>
 
-          <button className="ghost-button subtle-danger" onClick={onMonthRemove}>
+          <button className="ghost-button subtle-danger" onClick={onMonthRemove} disabled={disabled}>
             Remove Month
           </button>
         </div>
@@ -169,6 +169,7 @@ export function MonthBar({
               type="text"
               inputMode="decimal"
               value={startingBalanceInput}
+              disabled={disabled}
               onChange={(event) => setStartingBalanceInput(event.target.value)}
               onBlur={(event) => commitStartingBalance(event.target.value)}
             />
@@ -190,7 +191,7 @@ export function MonthBar({
           <div className="mini-stat">
             <div className="mini-stat-label">Transactions</div>
             <div className="mini-stat-value">
-              {month.transactions.length}
+              {disabled ? "…" : month.transactions.length}
             </div>
           </div>
         </div>

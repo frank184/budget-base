@@ -1,5 +1,12 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useApolloClient, useMutation, useQuery } from "@apollo/client";
 
+import {
+  BUDGET_QUERY,
+  FULL_BUDGET_DETAILS_QUERY,
+  MONTH_DETAILS_QUERY,
+  UPDATE_BUDGET_MUTATION
+} from "../api/operations";
 import { MonthBar } from "../components/MonthBar";
 import { PlannerPanel } from "../components/PlannerPanel";
 import { SnapshotPanel } from "../components/SnapshotPanel";
@@ -12,12 +19,19 @@ import {
   getCategoryNameLookup,
   getCurrentMonth,
   getMonthTotals,
+  getSelectedMonthId,
   getTransactions,
-  loadBudgetState,
   normalizeBudgetState,
-  patchCurrentMonth
+  patchCurrentMonth,
+  serializeBudgetState,
+  toBudgetMutationInput
 } from "../model/budget";
-import { createSampleState, STORAGE_KEY, THEME_KEY } from "../model/sampleState";
+import {
+  createSampleState,
+  SELECTED_MONTH_KEY,
+  SHOW_CURRENCY_CODE_KEY,
+  THEME_KEY
+} from "../model/sampleState";
 import { formatCurrency, formatDate, toAmount } from "../../../shared/lib/format";
 
 function syncFavicon(theme) {
@@ -26,8 +40,55 @@ function syncFavicon(theme) {
   favicon.setAttribute("href", theme === "dark" ? "/favicon-dark.svg" : "/favicon-light.svg");
 }
 
+function getStoredBoolean(key, fallback) {
+  const raw = localStorage.getItem(key);
+  if (raw === null) return fallback;
+  return raw === "true";
+}
+
+function getErrorMessage(error) {
+  if (!error) return "";
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+function buildVisibleBudgetState(shellBudget, monthDetails) {
+  if (!shellBudget) {
+    return null;
+  }
+
+  return normalizeBudgetState({
+    ...shellBudget,
+    categoryPlans: monthDetails?.categoryPlans || [],
+    transactions: monthDetails?.transactions || []
+  });
+}
+
+function PanelSkeleton({ rows = 4, className = "" }) {
+  return (
+    <section className={`panel panel-skeleton ${className}`.trim()}>
+      <div className="panel-head">
+        <div>
+          <p className="section-label skeleton-line skeleton-line-label" />
+        </div>
+      </div>
+      <div className="skeleton-stack">
+        {Array.from({ length: rows }).map((_, index) => (
+          <div className="skeleton-line" key={index} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function BudgetPage() {
-  const [state, setState] = useState(() => loadBudgetState(STORAGE_KEY));
+  const client = useApolloClient();
+  const initialMonthIdRef = useRef(localStorage.getItem(SELECTED_MONTH_KEY) || "");
+  const [budgetState, setBudgetState] = useState(null);
+  const [selectedMonthId, setSelectedMonthId] = useState(initialMonthIdRef.current);
+  const [activeDetailMonthId, setActiveDetailMonthId] = useState("");
+  const [activeMonthDetails, setActiveMonthDetails] = useState(null);
+  const [hasFullBudgetDetails, setHasFullBudgetDetails] = useState(false);
   const [planView, setPlanView] = useState("expense");
   const [transactionView, setTransactionView] = useState("all");
   const [selectedTransactionIds, setSelectedTransactionIds] = useState({
@@ -35,18 +96,126 @@ export function BudgetPage() {
     expense: null,
     income: null
   });
+  const [showCurrencyCode, setShowCurrencyCode] = useState(
+    () => getStoredBoolean(SHOW_CURRENCY_CODE_KEY, true)
+  );
   const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || "light");
+  const [saveError, setSaveError] = useState("");
+  const [monthLoadError, setMonthLoadError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const budgetStateRef = useRef(null);
+  const hasFullBudgetDetailsRef = useRef(false);
+  const saveStateRef = useRef({
+    inFlight: false,
+    queued: null
+  });
 
-  const month = useMemo(() => getCurrentMonth(state), [state]);
-  const totals = useMemo(() => getMonthTotals(month), [month]);
-  const planCategories = useMemo(() => getCategories(month, planView), [month, planView]);
+  const { data: shellData, loading: shellLoading, error: shellError } = useQuery(BUDGET_QUERY, {
+    fetchPolicy: "cache-first"
+  });
+  const {
+    data: monthDetailsData,
+    loading: monthDetailsLoading,
+    error: monthDetailsError
+  } = useQuery(MONTH_DETAILS_QUERY, {
+    variables: {
+      monthId: selectedMonthId
+    },
+    skip: !selectedMonthId,
+    fetchPolicy: "cache-first"
+  });
+  const [commitBudget] = useMutation(UPDATE_BUDGET_MUTATION);
+
+  useEffect(() => {
+    setActiveMonthDetails(null);
+  }, [selectedMonthId]);
+
+  useEffect(() => {
+    if (!selectedMonthId || !monthDetailsData || monthDetailsLoading) {
+      return;
+    }
+
+    setActiveMonthDetails({
+      monthId: selectedMonthId,
+      data: monthDetailsData
+    });
+  }, [selectedMonthId, monthDetailsData, monthDetailsLoading]);
+
+  useEffect(() => {
+    if (!shellData?.budget) {
+      return;
+    }
+
+    const monthDetailsForSelection =
+      activeMonthDetails?.monthId === selectedMonthId ? activeMonthDetails.data : null;
+    const visibleState = buildVisibleBudgetState(shellData.budget, monthDetailsForSelection);
+
+    if (!visibleState) {
+      return;
+    }
+
+    syncBudgetFromServer(visibleState, {
+      hasFullDetails: false,
+      detailMonthId: selectedMonthId && monthDetailsForSelection ? selectedMonthId : ""
+    });
+  }, [shellData, activeMonthDetails, selectedMonthId]);
+
+  useEffect(() => {
+    if (!monthDetailsError || !budgetStateRef.current) {
+      return;
+    }
+
+    setMonthLoadError(getErrorMessage(monthDetailsError));
+  }, [monthDetailsError]);
+
+  useEffect(() => {
+    if (!selectedMonthId || monthDetailsLoading) {
+      return;
+    }
+
+    if (monthDetailsData) {
+      setMonthLoadError("");
+    }
+  }, [selectedMonthId, monthDetailsData, monthDetailsLoading]);
+
+  useEffect(() => {
+    localStorage.setItem(THEME_KEY, theme);
+    document.documentElement.dataset.theme = theme;
+    syncFavicon(theme);
+  }, [theme]);
+
+  useEffect(() => {
+    if (!selectedMonthId) return;
+    localStorage.setItem(SELECTED_MONTH_KEY, selectedMonthId);
+  }, [selectedMonthId]);
+
+  useEffect(() => {
+    localStorage.setItem(SHOW_CURRENCY_CODE_KEY, String(showCurrencyCode));
+  }, [showCurrencyCode]);
+
+  const month = useMemo(
+    () => (budgetState ? getCurrentMonth(budgetState, selectedMonthId) : null),
+    [budgetState, selectedMonthId]
+  );
+  const isCurrentMonthLoaded = Boolean(month) && (hasFullBudgetDetails || activeDetailMonthId === selectedMonthId);
+  const totals = useMemo(
+    () => (month && isCurrentMonthLoaded ? getMonthTotals(month) : null),
+    [month, isCurrentMonthLoaded]
+  );
+  const planCategories = useMemo(
+    () => (month ? getCategories(month, planView) : []),
+    [month, planView]
+  );
   const transactionCategories = useMemo(
-    () => getCategories(month, transactionView),
+    () => (month ? getCategories(month, transactionView) : []),
     [month, transactionView]
   );
-  const transactionCategoryLookup = useMemo(() => getCategoryNameLookup(month), [month]);
+  const transactionCategoryLookup = useMemo(
+    () => (month ? getCategoryNameLookup(month) : {}),
+    [month]
+  );
   const transactions = useMemo(
-    () => getTransactions(month, transactionView),
+    () => (month ? getTransactions(month, transactionView) : []),
     [month, transactionView]
   );
   const sortedVisibleTransactions = useMemo(
@@ -55,21 +224,11 @@ export function BudgetPage() {
   );
   const currencyFormatter = useMemo(
     () => (value) =>
-      formatCurrency(value, state.currency || "CAD", {
-        showCurrencyCode: state.showCurrencyCode ?? true
+      formatCurrency(value, budgetState?.currency || "CAD", {
+        showCurrencyCode
       }),
-    [state.currency, state.showCurrencyCode]
+    [budgetState?.currency, showCurrencyCode]
   );
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
-
-  useEffect(() => {
-    localStorage.setItem(THEME_KEY, theme);
-    document.documentElement.dataset.theme = theme;
-    syncFavicon(theme);
-  }, [theme]);
 
   useEffect(() => {
     if (!sortedVisibleTransactions.length) {
@@ -95,63 +254,250 @@ export function BudgetPage() {
   const selectedTransaction =
     sortedVisibleTransactions.find((transaction) => transaction.id === selectedTransactionId) || null;
   const selectedTransactionKind = selectedTransaction?.type || transactionView;
-  const selectedTransactionCategories = getCategories(
-    month,
-    selectedTransactionKind === "all" ? "expense" : selectedTransactionKind
-  );
+  const selectedTransactionCategories = month
+    ? getCategories(month, selectedTransactionKind === "all" ? "expense" : selectedTransactionKind)
+    : [];
 
-  function patchMonth(recipe) {
-    setState((current) => patchCurrentMonth(current, recipe));
+  function syncBudgetFromServer(nextState, { hasFullDetails = false, detailMonthId = "" } = {}) {
+    budgetStateRef.current = nextState;
+    hasFullBudgetDetailsRef.current = hasFullDetails;
+    setBudgetState(nextState);
+    setHasFullBudgetDetails(hasFullDetails);
+    setActiveDetailMonthId(detailMonthId);
+    setSelectedMonthId((current) => getSelectedMonthId(nextState, current));
+  }
+
+  async function ensureWritableBudgetState() {
+    const currentState = budgetStateRef.current;
+    if (!currentState) {
+      throw new Error("Budget state is not available.");
+    }
+
+    if (hasFullBudgetDetailsRef.current) {
+      return currentState;
+    }
+
+    let cached = null;
+
+    try {
+      cached = client.readQuery({
+        query: FULL_BUDGET_DETAILS_QUERY
+      });
+    } catch {
+      cached = null;
+    }
+
+    if (cached?.budget) {
+      const normalized = normalizeBudgetState(cached.budget);
+      syncBudgetFromServer(normalized, {
+        hasFullDetails: true,
+        detailMonthId: selectedMonthId
+      });
+      return normalized;
+    }
+
+    const result = await client.query({
+      query: FULL_BUDGET_DETAILS_QUERY,
+      fetchPolicy: "network-only"
+    });
+    const normalized = normalizeBudgetState(result.data.budget);
+    syncBudgetFromServer(normalized, {
+      hasFullDetails: true,
+      detailMonthId: selectedMonthId
+    });
+    setActiveMonthDetails({
+      monthId: selectedMonthId,
+      data: {
+        categoryPlans: normalized.categoryPlans,
+        transactions: normalized.transactions
+      }
+    });
+    return normalized;
+  }
+
+  async function executeSave(request) {
+    const controller = saveStateRef.current;
+    controller.inFlight = true;
+    setIsSaving(true);
+    setSaveError("");
+
+    try {
+      const result = await commitBudget({
+        variables: {
+          input: toBudgetMutationInput(request.snapshot)
+        }
+      });
+
+      const budgetCacheId = client.cache.identify({
+        __typename: "BudgetType",
+        id: result.data.updateBudget.id
+      });
+
+      client.writeQuery({
+        query: FULL_BUDGET_DETAILS_QUERY,
+        data: {
+          budget: result.data.updateBudget
+        }
+      });
+
+      if (budgetCacheId) {
+        client.cache.evict({
+          id: budgetCacheId,
+          fieldName: "categoryPlans"
+        });
+        client.cache.evict({
+          id: budgetCacheId,
+          fieldName: "transactions"
+        });
+      }
+
+      client.cache.evict({
+        id: "ROOT_QUERY",
+        fieldName: "categoryPlans"
+      });
+      client.cache.evict({
+        id: "ROOT_QUERY",
+        fieldName: "transactions"
+      });
+      client.cache.gc();
+
+      const nextState = normalizeBudgetState(result.data.updateBudget);
+      setActiveMonthDetails({
+        monthId: selectedMonthId,
+        data: {
+          categoryPlans: nextState.categoryPlans,
+          transactions: nextState.transactions
+        }
+      });
+
+      if (request.applyLocalSuccess && !controller.queued) {
+        syncBudgetFromServer(nextState, {
+          hasFullDetails: true,
+          detailMonthId: selectedMonthId
+        });
+      }
+
+      request.resolve?.(nextState);
+    } catch (mutationError) {
+      setSaveError(getErrorMessage(mutationError));
+      request.reject?.(mutationError);
+    } finally {
+      controller.inFlight = false;
+
+      if (controller.queued) {
+        const nextRequest = controller.queued;
+        controller.queued = null;
+        void executeSave(nextRequest);
+      } else {
+        setIsSaving(false);
+      }
+    }
+  }
+
+  function saveSnapshot(snapshot, { applyLocalSuccess = true } = {}) {
+    return new Promise((resolve, reject) => {
+      const request = {
+        snapshot,
+        applyLocalSuccess,
+        resolve,
+        reject
+      };
+
+      if (saveStateRef.current.inFlight) {
+        saveStateRef.current.queued?.reject?.(new Error("Save superseded by a newer change."));
+        saveStateRef.current.queued = request;
+        return;
+      }
+
+      void executeSave(request);
+    });
+  }
+
+  async function persistBudgetRecipe(recipe) {
+    const writableState = await ensureWritableBudgetState();
+    const snapshot = recipe(writableState);
+    await saveSnapshot(snapshot);
+  }
+
+  function updateBudgetState(recipe, { persist = true } = {}) {
+    const currentState = budgetStateRef.current;
+    if (!currentState) return;
+
+    const nextSnapshot = recipe(currentState);
+    budgetStateRef.current = nextSnapshot;
+    setBudgetState(nextSnapshot);
+
+    if (persist) {
+      void persistBudgetRecipe(recipe).catch((saveFailure) => {
+        setSaveError(getErrorMessage(saveFailure));
+      });
+    }
+  }
+
+  function patchMonth(recipe, options) {
+    updateBudgetState((current) => patchCurrentMonth(current, selectedMonthId, recipe), options);
+  }
+
+  function resetTransactionSelection() {
+    setSelectedTransactionIds({
+      all: null,
+      expense: null,
+      income: null
+    });
   }
 
   function handleMonthSelect(monthId) {
-    setState((current) => ({ ...current, selectedMonthId: monthId }));
-    setSelectedTransactionIds({
-      all: null,
-      expense: null,
-      income: null
-    });
+    setSelectedMonthId(monthId);
+    setMonthLoadError("");
+    resetTransactionSelection();
   }
 
   function handleMonthRemove() {
-    if (state.months.length === 1) return;
+    if (!budgetState || budgetState.months.length === 1 || !month) return;
 
-    const ordered = state.months.slice().sort((a, b) => a.id.localeCompare(b.id));
-    const index = ordered.findIndex((entry) => entry.id === state.selectedMonthId);
+    const ordered = budgetState.months.slice().sort((a, b) => a.id.localeCompare(b.id));
+    const index = ordered.findIndex((entry) => entry.id === selectedMonthId);
     const fallback = ordered[index - 1] || ordered[index + 1];
 
-    setState((current) => {
-      const nextMonths = current.months.filter((entry) => entry.id !== current.selectedMonthId);
-      const nextCategoryLinks = current.categoryLinks.filter(
-        (link) => link.monthId !== current.selectedMonthId
-      );
+    updateBudgetState((current) => {
+      const nextMonths = current.months.filter((entry) => entry.id !== selectedMonthId);
+      const nextCategoryPlans = current.categoryPlans.filter((link) => link.monthId !== selectedMonthId);
       const nextTransactions = current.transactions.filter(
-        (transaction) => transaction.monthKey !== month.monthKey
+        (transaction) => transaction.monthId !== month.id
       );
-      const referencedCategoryIds = new Set([
-        ...nextCategoryLinks.map((link) => link.categoryId),
-        ...nextTransactions.map((transaction) => transaction.categoryId)
-      ]);
 
       return {
         ...current,
-        selectedMonthId: fallback.id,
         months: nextMonths,
-        categories: current.categories.filter((category) => referencedCategoryIds.has(category.id)),
-        categoryLinks: nextCategoryLinks,
+        categoryPlans: nextCategoryPlans,
         transactions: nextTransactions
       };
     });
-    setSelectedTransactionIds({
-      all: null,
-      expense: null,
-      income: null
-    });
+    setSelectedMonthId(fallback.id);
+    resetTransactionSelection();
+  }
+
+  function handleMonthAdd() {
+    const currentState = budgetStateRef.current;
+    if (!currentState || !month) return;
+
+    const nextState = addMonth(currentState, selectedMonthId);
+    const nextMonthId = nextState.months
+      .slice()
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .at(-1)?.id;
+
+    updateBudgetState(() => nextState);
+    if (nextMonthId) {
+      setSelectedMonthId(nextMonthId);
+    }
+    resetTransactionSelection();
   }
 
   function handleCategoryUpdate(categoryId, key, value) {
     patchMonth((draft) => {
       const target = getCategories(draft, planView).find((category) => category.id === categoryId);
+      if (!target) return draft;
       target[key] = key === "planned" ? toAmount(value) : value;
       return draft;
     });
@@ -213,14 +559,14 @@ export function BudgetPage() {
   function handleTransactionUpdate(transactionId, key, value) {
     patchMonth((draft) => {
       const transaction = draft.transactions.find((entry) => entry.id === transactionId);
+      if (!transaction) return draft;
       transaction[key] = key === "amount" ? toAmount(value) : value;
       return draft;
     });
   }
 
   function handleTransactionAdd() {
-    if (transactionView === "all") return;
-    if (!transactionCategories.length) return;
+    if (transactionView === "all" || !transactionCategories.length || !month) return;
 
     const transaction = {
       id: crypto.randomUUID(),
@@ -256,6 +602,8 @@ export function BudgetPage() {
   }
 
   function handleTransactionViewChange(nextView) {
+    if (!month) return;
+
     const nextTransactions = getTransactions(month, nextView);
     const sortedNextTransactions = nextTransactions
       .slice()
@@ -277,8 +625,9 @@ export function BudgetPage() {
     });
   }
 
-  function handleExport() {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  async function handleExport() {
+    const exportState = await ensureWritableBudgetState();
+    const blob = new Blob([serializeBudgetState(exportState)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -287,27 +636,32 @@ export function BudgetPage() {
     URL.revokeObjectURL(url);
   }
 
-  function handleImport(event) {
+  async function replaceServerBudget(nextState) {
+    const savedState = await saveSnapshot(nextState, { applyLocalSuccess: true });
+    syncBudgetFromServer(savedState, {
+      hasFullDetails: true,
+      detailMonthId: selectedMonthId
+    });
+    resetTransactionSelection();
+  }
+
+  async function handleImport(event) {
     const file = event.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
         const parsed = JSON.parse(String(reader.result));
+        const normalized = normalizeBudgetState(parsed);
 
-        if (!parsed.months?.length) {
+        if (!normalized.months?.length) {
           throw new Error("Imported file does not contain any months.");
         }
 
-        setState(normalizeBudgetState(parsed));
-        setSelectedTransactionIds({
-          all: null,
-          expense: null,
-          income: null
-        });
-      } catch (error) {
-        window.alert(error.message);
+        await replaceServerBudget(normalized);
+      } catch (importError) {
+        window.alert(getErrorMessage(importError));
       } finally {
         event.target.value = "";
       }
@@ -315,44 +669,76 @@ export function BudgetPage() {
     reader.readAsText(file);
   }
 
+  async function handleReset() {
+    try {
+      await replaceServerBudget(normalizeBudgetState(createSampleState()));
+    } catch (resetError) {
+      window.alert(getErrorMessage(resetError));
+    }
+  }
+
+  if (!budgetState && shellLoading) {
+    return (
+      <div className="app-shell">
+        <section className="panel">
+          <p className="section-label">Loading</p>
+          <h2>Loading budget data…</h2>
+        </section>
+      </div>
+    );
+  }
+
+  if (!budgetState && shellError) {
+    return (
+      <div className="app-shell">
+        <section className="panel">
+          <p className="section-label">Load Error</p>
+          <h2>Budget data could not be loaded.</h2>
+          <p>{getErrorMessage(shellError)}</p>
+        </section>
+      </div>
+    );
+  }
+
+  if (!budgetState || !month) {
+    return null;
+  }
+
   return (
     <div className="app-shell">
       <TopBar
         theme={theme}
-        currency={state.currency || "CAD"}
-        showCurrencyCode={state.showCurrencyCode ?? true}
+        currency={budgetState.currency || "CAD"}
+        showCurrencyCode={showCurrencyCode}
         onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
         onCurrencyChange={(currency) =>
-          setState((current) => ({
+          updateBudgetState((current) => ({
             ...current,
             currency
           }))
         }
-        onCurrencyCodeToggle={() =>
-          setState((current) => ({
-            ...current,
-            showCurrencyCode: !(current.showCurrencyCode ?? true)
-          }))
-        }
+        onCurrencyCodeToggle={() => setShowCurrencyCode((current) => !current)}
         onExport={handleExport}
         onImport={handleImport}
-        onReset={() => {
-          setState(normalizeBudgetState(createSampleState()));
-          setSelectedTransactionIds({
-            all: null,
-            expense: null,
-            income: null
-          });
-        }}
+        onReset={handleReset}
       />
 
+      {(saveError || monthLoadError || isSaving) && (
+        <section className="panel">
+          <p className="section-label">
+            {saveError ? "Save Error" : monthLoadError ? "Month Load Error" : "Saving"}
+          </p>
+          <p>{saveError || monthLoadError || "Syncing budget changes to the API."}</p>
+        </section>
+      )}
+
       <MonthBar
-        state={state}
+        state={{ months: budgetState.months, selectedMonthId }}
         month={month}
-        totals={totals}
+        totals={totals || { plannedNet: 0, actualNet: 0 }}
         formatCurrency={currencyFormatter}
         onMonthSelect={handleMonthSelect}
-        onMonthAdd={() => setState((current) => addMonth(current))}
+        onMonthAdd={handleMonthAdd}
         onMonthRemove={handleMonthRemove}
         onStartingBalanceChange={(value) =>
           patchMonth((draft) => {
@@ -360,47 +746,65 @@ export function BudgetPage() {
             return draft;
           })
         }
+        disabled={!isCurrentMonthLoaded}
       />
 
       <main className="workspace">
         <section className="main-column">
-          <SummaryGrid month={month} totals={totals} formatCurrency={currencyFormatter} />
-          <SnapshotPanel month={month} totals={totals} formatCurrency={currencyFormatter} />
-          <PlannerPanel
-            view={planView}
-            categories={planCategories}
-            month={month}
-            totals={totals}
-            formatCurrency={currencyFormatter}
-            onViewChange={setPlanView}
-            onAdd={handleCategoryAdd}
-            onUpdate={handleCategoryUpdate}
-            onDelete={handleCategoryDelete}
-            onReorder={handleCategoryReorder}
-          />
+          {isCurrentMonthLoaded && totals ? (
+            <>
+              <SummaryGrid month={month} totals={totals} formatCurrency={currencyFormatter} />
+              <SnapshotPanel month={month} totals={totals} formatCurrency={currencyFormatter} />
+              <PlannerPanel
+                view={planView}
+                categories={planCategories}
+                month={month}
+                totals={totals}
+                formatCurrency={currencyFormatter}
+                onViewChange={setPlanView}
+                onAdd={handleCategoryAdd}
+                onUpdate={handleCategoryUpdate}
+                onDelete={handleCategoryDelete}
+                onReorder={handleCategoryReorder}
+              />
+            </>
+          ) : (
+            <>
+              <PanelSkeleton rows={5} className="summary-matrix-panel" />
+              <PanelSkeleton rows={6} />
+              <PanelSkeleton rows={8} />
+            </>
+          )}
         </section>
 
         <aside className="side-column">
-          <TransactionPanel
-            view={transactionView}
-            categories={transactionCategories}
-            categoryLookup={transactionCategoryLookup}
-            transactions={sortedVisibleTransactions}
-            selectedTransaction={selectedTransaction}
-            selectedTransactionCategories={selectedTransactionCategories}
-            onViewChange={handleTransactionViewChange}
-            onSelect={(transactionId) =>
-              setSelectedTransactionIds((current) => ({
-                ...current,
-                [transactionView]: transactionId
-              }))
-            }
-            onAdd={handleTransactionAdd}
-            onUpdate={handleTransactionUpdate}
-            onDelete={handleTransactionDelete}
-            formatDate={formatDate}
-            formatCurrency={currencyFormatter}
-          />
+          {isCurrentMonthLoaded ? (
+            <TransactionPanel
+              view={transactionView}
+              categories={transactionCategories}
+              categoryLookup={transactionCategoryLookup}
+              transactions={sortedVisibleTransactions}
+              selectedTransaction={selectedTransaction}
+              selectedTransactionCategories={selectedTransactionCategories}
+              onViewChange={handleTransactionViewChange}
+              onSelect={(transactionId) =>
+                setSelectedTransactionIds((current) => ({
+                  ...current,
+                  [transactionView]: transactionId
+                }))
+              }
+              onAdd={handleTransactionAdd}
+              onUpdate={handleTransactionUpdate}
+              onDelete={handleTransactionDelete}
+              formatDate={formatDate}
+              formatCurrency={currencyFormatter}
+            />
+          ) : (
+            <>
+              <PanelSkeleton rows={8} />
+              <PanelSkeleton rows={5} />
+            </>
+          )}
         </aside>
       </main>
     </div>

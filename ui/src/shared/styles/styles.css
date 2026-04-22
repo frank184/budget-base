@@ -40,6 +40,12 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -55,7 +61,9 @@ select {
 }
 
 .app-shell {
-  width: min(1400px, calc(100vw - 18px));
+  width: min(1400px, 100%);
+  max-width: 100%;
+  padding-inline: 8px;
   margin: 8px auto 16px;
 }
 
@@ -72,6 +80,7 @@ select {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel);
+  min-width: 0;
 }
 
 .topbar,
@@ -116,6 +125,7 @@ select {
   gap: 10px;
   flex-wrap: wrap;
   align-items: flex-end;
+  min-width: 0;
 }
 
 .panel-head .segmented {
@@ -256,6 +266,56 @@ h3 {
   border-color: transparent;
 }
 
+.ghost-button:disabled,
+.primary-button:disabled,
+.month-tab:disabled,
+.segmented-button:disabled,
+.icon-button:disabled,
+input:disabled,
+select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.panel-skeleton {
+  min-height: 220px;
+}
+
+.skeleton-stack {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.skeleton-line {
+  height: 14px;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--line) 80%, transparent) 0%,
+    color-mix(in srgb, var(--panel-strong) 70%, var(--line)) 50%,
+    color-mix(in srgb, var(--line) 80%, transparent) 100%
+  );
+  background-size: 220% 100%;
+  animation: skeleton-pulse 1.4s ease infinite;
+}
+
+.skeleton-line-label {
+  width: 84px;
+  height: 10px;
+}
+
+@keyframes skeleton-pulse {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -20% 0;
+  }
+}
+
 .month-banner .primary-button {
   background: var(--accent-soft);
   color: var(--good);
@@ -284,6 +344,7 @@ h3 {
 
 .month-banner {
   margin-top: 8px;
+  overflow: clip;
 }
 
 .month-tabs {
@@ -312,6 +373,7 @@ h3 {
   gap: 6px;
   margin-top: 6px;
   align-items: end;
+  min-width: 0;
 }
 
 .field {
@@ -525,12 +587,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   grid-template-columns: minmax(0, 1.75fr) minmax(300px, 0.85fr);
   gap: 8px;
   margin-top: 8px;
+  min-width: 0;
 }
 
 .main-column,
 .side-column {
   gap: 8px;
   align-content: start;
+  min-width: 0;
 }
 
 .side-column>.panel:first-child {
@@ -650,6 +714,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-top: 6px;
+  min-width: 0;
 }
 
 .snapshot-status {
@@ -752,6 +817,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 table {
   width: 100%;
+  max-width: 100%;
   border-collapse: collapse;
   margin-top: 6px;
   table-layout: fixed;
@@ -941,6 +1007,7 @@ td.numeric {
 .transaction-ledger {
   gap: 0;
   flex: 1 1 auto;
+  min-width: 0;
   max-height: 410px;
   overflow: auto;
   border: 1px solid var(--line);
@@ -954,6 +1021,7 @@ td.numeric {
   gap: 8px;
   align-items: center;
   width: 100%;
+  min-width: 0;
   padding: 7px 8px;
   border: 0;
   border-bottom: 1px solid var(--line);
@@ -1134,6 +1202,10 @@ td.numeric {
   .summary-grid,
   .mini-stats {
     grid-template-columns: 1fr;
+  }
+
+  .workspace {
+    gap: 10px;
   }
 }
 

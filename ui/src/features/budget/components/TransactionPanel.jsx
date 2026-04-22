@@ -21,6 +21,7 @@ export function TransactionPanel({
   const [amountInput, setAmountInput] = useState(
     selectedTransaction ? toAmount(selectedTransaction.amount).toFixed(2) : "0.00"
   );
+  const [descriptionInput, setDescriptionInput] = useState(selectedTransaction?.description || "");
   const categoryOptions =
     selectedTransaction &&
       !selectedTransactionCategories.some((category) => category.id === selectedTransaction.categoryId)
@@ -38,6 +39,10 @@ export function TransactionPanel({
       selectedTransaction ? toAmount(selectedTransaction.amount).toFixed(2) : "0.00"
     );
   }, [selectedTransaction?.id, selectedTransaction?.amount]);
+
+  useEffect(() => {
+    setDescriptionInput(selectedTransaction?.description || "");
+  }, [selectedTransaction?.id, selectedTransaction?.description]);
 
   function commitAmount(value) {
     if (!selectedTransaction) return;
@@ -151,8 +156,9 @@ export function TransactionPanel({
               <label className="field">
                 <span>Description</span>
                 <input
-                  value={selectedTransaction.description}
-                  onChange={(event) => onUpdate(selectedTransaction.id, "description", event.target.value)}
+                  value={descriptionInput}
+                  onChange={(event) => setDescriptionInput(event.target.value)}
+                  onBlur={(event) => onUpdate(selectedTransaction.id, "description", event.target.value)}
                 />
               </label>
               <label className="field">
