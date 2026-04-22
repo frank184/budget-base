@@ -1,0 +1,47 @@
+services:
+  ui:
+    build:
+      context: ./ui
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+      VITE_APOLLO_DEBUG: "true"
+      VITE_GRAPHQL_PROXY_TARGET: "http://api:3001"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./ui/src:/app/src
+      - ./ui/public:/app/public
+      - ./ui/index.html:/app/index.html
+      - ./ui/vite.config.js:/app/vite.config.js
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./api
+    command: npm run dev
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+      LOG_LEVEL: debug
+      GRAPHQL_DEBUG: "true"
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    volumes:
+      - ./api/src:/app/src
+      - ./api/data:/app/data
+      - ./api/tsconfig.json:/app/tsconfig.json
+    restart: unless-stopped
+
+volumes:
+  ui_node_modules:
+  api_node_modules:

@@ -1,0 +1,28 @@
+{
+  "name": "budget-base-api",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "npm run build && concurrently -k -n TSC,API -c yellow,cyan \"npm run dev:compile\" \"npm run dev:serve\"",
+    "dev:compile": "tsc -w -p tsconfig.json --preserveWatchOutput",
+    "dev:serve": "node --watch dist/main.js",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.1.19",
+    "@nestjs/core": "^11.1.19",
+    "@nestjs/graphql": "^13.2.5",
+    "@nestjs/mercurius": "^13.2.5",
+    "@nestjs/platform-fastify": "^11.0.20",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.6.0",
+    "better-sqlite3": "^12.9.0",
+    "concurrently": "^9.2.1",
+    "graphql": "^16.13.2",
+    "mercurius": "^16.9.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "typescript": "^6.0.2"
+  }
+}
