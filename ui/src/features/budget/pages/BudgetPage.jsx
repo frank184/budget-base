@@ -27,7 +27,6 @@ import {
   toBudgetMutationInput
 } from "../model/budget";
 import {
-  createSampleState,
   SELECTED_MONTH_KEY,
   SHOW_CURRENCY_CODE_KEY,
   THEME_KEY
@@ -52,15 +51,81 @@ function getErrorMessage(error) {
   return String(error);
 }
 
-function buildVisibleBudgetState(shellBudget, monthDetails) {
+function transactionFallsInMonth(transaction, month) {
+  if (!transaction || !month) return false;
+  return transaction.occurredAt >= month.startAt && transaction.occurredAt <= month.endAt;
+}
+
+function buildVisibleBudgetState(shellBudget, monthDetails, monthId, previousState) {
   if (!shellBudget) {
     return null;
   }
 
+  const selectedMonth = shellBudget.months?.find((entry) => entry.id === monthId);
+  const detailsCategoryPlans = (monthDetails?.categoryPlans || []).filter(
+    (link) => !monthId || link.monthId === monthId
+  );
+  const detailsTransactions = selectedMonth
+    ? (monthDetails?.transactions || []).filter((transaction) =>
+        transactionFallsInMonth(transaction, selectedMonth)
+      )
+    : [];
+  const previousCategoryPlans = previousState?.categoryPlans || [];
+  const previousTransactions = previousState?.transactions || [];
+
   return normalizeBudgetState({
     ...shellBudget,
-    categoryPlans: monthDetails?.categoryPlans || [],
-    transactions: monthDetails?.transactions || []
+    categoryPlans: monthDetails
+      ? [
+          ...previousCategoryPlans.filter((link) => link.monthId !== monthId),
+          ...detailsCategoryPlans
+        ]
+      : previousCategoryPlans,
+    transactions: monthDetails && selectedMonth
+      ? [
+          ...previousTransactions.filter((transaction) =>
+            !transactionFallsInMonth(transaction, selectedMonth)
+          ),
+          ...detailsTransactions
+        ]
+      : previousTransactions
+  });
+}
+
+function mergeLoadedMonthDetailsIntoFullBudget(fullState, partialState, loadedMonthIds) {
+  const loadedIds = new Set(loadedMonthIds);
+
+  if (!loadedIds.size) {
+    return fullState;
+  }
+
+  const fullMonthsById = new Map(fullState.months.map((month) => [month.id, month]));
+  const partialMonthsById = new Map(partialState.months.map((month) => [month.id, month]));
+  const months = fullState.months.map((month) => partialMonthsById.get(month.id) || month);
+
+  return normalizeBudgetState({
+    ...fullState,
+    currency: partialState.currency,
+    months,
+    categories: Array.from(
+      new Map([...fullState.categories, ...partialState.categories].map((category) => [category.id, category])).values()
+    ),
+    categoryPlans: [
+      ...fullState.categoryPlans.filter((link) => !loadedIds.has(link.monthId)),
+      ...partialState.categoryPlans.filter((link) => loadedIds.has(link.monthId))
+    ],
+    transactions: [
+      ...fullState.transactions.filter((transaction) => {
+        const month = fullState.months.find(
+          (entry) => loadedIds.has(entry.id) && transactionFallsInMonth(transaction, entry)
+        );
+        return !month;
+      }),
+      ...partialState.transactions.filter((transaction) => {
+        const month = months.find((entry) => loadedIds.has(entry.id) && transactionFallsInMonth(transaction, entry));
+        return Boolean(month || fullMonthsById.get(transaction.occurredAt.slice(0, 7)));
+      })
+    ]
   });
 }
 
@@ -81,7 +146,66 @@ function PanelSkeleton({ rows = 4, className = "" }) {
   );
 }
 
-export function BudgetPage() {
+function hasBudgetData(state) {
+  if (!state) return false;
+  return (
+    state.transactions.length > 0 ||
+    state.categoryPlans.some((plan) => toAmount(plan.planned) !== 0) ||
+    state.months.some((month) => toAmount(month.startingBalance) !== 0)
+  );
+}
+
+function buildCurrentMonthRecord() {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth() + 1;
+  const monthId = `${year}-${String(month).padStart(2, "0")}`;
+  const monthName = new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString(undefined, {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC"
+  });
+  const endAt = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999)).toISOString();
+
+  return {
+    id: monthId,
+    name: monthName,
+    startAt: `${monthId}-01T00:00:00.000Z`,
+    endAt,
+    startingBalance: 0
+  };
+}
+
+function buildEmptyBudgetState(state) {
+  const month = buildCurrentMonthRecord();
+
+  return {
+    id: state.id,
+    name: state.name,
+    currency: state.currency || "CAD",
+    months: [
+      {
+        ...month,
+        startingBalance: 0
+      }
+    ],
+    categories: [],
+    categoryPlans: [],
+    transactions: []
+  };
+}
+
+function getDraftTransactionDate(month) {
+  const today = new Date().toISOString().slice(0, 10);
+  const startDate = month.startAt.slice(0, 10);
+  const endDate = month.endAt.slice(0, 10);
+
+  if (today < startDate) return startDate;
+  if (today > endDate) return endDate;
+  return today;
+}
+
+export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: setControlledTheme }) {
   const client = useApolloClient();
   const initialMonthIdRef = useRef(localStorage.getItem(SELECTED_MONTH_KEY) || "");
   const [budgetState, setBudgetState] = useState(null);
@@ -99,16 +223,21 @@ export function BudgetPage() {
   const [showCurrencyCode, setShowCurrencyCode] = useState(
     () => getStoredBoolean(SHOW_CURRENCY_CODE_KEY, true)
   );
-  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || "light");
+  const [localTheme, setLocalTheme] = useState(() => localStorage.getItem(THEME_KEY) || "light");
   const [saveError, setSaveError] = useState("");
   const [monthLoadError, setMonthLoadError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const budgetStateRef = useRef(null);
   const hasFullBudgetDetailsRef = useRef(false);
+  const hasLocalBudgetEditRef = useRef(false);
+  const removableNewMonthIdRef = useRef("");
   const saveStateRef = useRef({
     inFlight: false,
     queued: null
   });
+  const debouncedSaveRef = useRef(null);
+  const loadedMonthIdsRef = useRef(new Set());
+  const shouldSkipMonthDetailsQuery = !selectedMonthId || hasLocalBudgetEditRef.current;
 
   const { data: shellData, loading: shellLoading, error: shellError } = useQuery(BUDGET_QUERY, {
     fetchPolicy: "cache-first"
@@ -121,13 +250,13 @@ export function BudgetPage() {
     variables: {
       monthId: selectedMonthId
     },
-    skip: !selectedMonthId,
-    fetchPolicy: "cache-first"
+    skip: shouldSkipMonthDetailsQuery,
+    fetchPolicy: "no-cache"
   });
   const [commitBudget] = useMutation(UPDATE_BUDGET_MUTATION);
 
   useEffect(() => {
-    setActiveMonthDetails(null);
+    setActiveMonthDetails((current) => (current?.monthId === selectedMonthId ? current : null));
   }, [selectedMonthId]);
 
   useEffect(() => {
@@ -135,6 +264,7 @@ export function BudgetPage() {
       return;
     }
 
+    loadedMonthIdsRef.current.add(selectedMonthId);
     setActiveMonthDetails({
       monthId: selectedMonthId,
       data: monthDetailsData
@@ -146,9 +276,32 @@ export function BudgetPage() {
       return;
     }
 
+    if (hasLocalBudgetEditRef.current) {
+      return;
+    }
+
+    const shellHasSelectedMonth =
+      !selectedMonthId || shellData.budget.months?.some((entry) => entry.id === selectedMonthId);
+    const localHasSelectedMonth =
+      selectedMonthId && budgetStateRef.current?.months?.some((entry) => entry.id === selectedMonthId);
+
+    if (!shellHasSelectedMonth && localHasSelectedMonth) {
+      return;
+    }
+
     const monthDetailsForSelection =
       activeMonthDetails?.monthId === selectedMonthId ? activeMonthDetails.data : null;
-    const visibleState = buildVisibleBudgetState(shellData.budget, monthDetailsForSelection);
+
+    if (!monthDetailsForSelection && hasFullBudgetDetailsRef.current) {
+      return;
+    }
+
+    const visibleState = buildVisibleBudgetState(
+      shellData.budget,
+      monthDetailsForSelection,
+      selectedMonthId,
+      budgetStateRef.current
+    );
 
     if (!visibleState) {
       return;
@@ -156,33 +309,37 @@ export function BudgetPage() {
 
     syncBudgetFromServer(visibleState, {
       hasFullDetails: false,
-      detailMonthId: selectedMonthId && monthDetailsForSelection ? selectedMonthId : ""
+      detailMonthId: selectedMonthId && monthDetailsForSelection ? selectedMonthId : activeDetailMonthId
     });
-  }, [shellData, activeMonthDetails, selectedMonthId]);
+  }, [shellData, activeMonthDetails, selectedMonthId, activeDetailMonthId]);
 
   useEffect(() => {
-    if (!monthDetailsError || !budgetStateRef.current) {
+    if (shouldSkipMonthDetailsQuery || !monthDetailsError || !budgetStateRef.current) {
       return;
     }
 
     setMonthLoadError(getErrorMessage(monthDetailsError));
-  }, [monthDetailsError]);
+  }, [monthDetailsError, shouldSkipMonthDetailsQuery]);
 
   useEffect(() => {
     if (!selectedMonthId || monthDetailsLoading) {
       return;
     }
 
-    if (monthDetailsData) {
+    if (monthDetailsData || activeMonthDetails?.monthId === selectedMonthId) {
       setMonthLoadError("");
     }
-  }, [selectedMonthId, monthDetailsData, monthDetailsLoading]);
+  }, [selectedMonthId, activeMonthDetails, monthDetailsData, monthDetailsLoading]);
 
   useEffect(() => {
-    localStorage.setItem(THEME_KEY, theme);
-    document.documentElement.dataset.theme = theme;
-    syncFavicon(theme);
-  }, [theme]);
+    const nextTheme = controlledTheme ?? localTheme;
+    localStorage.setItem(THEME_KEY, nextTheme);
+    document.documentElement.dataset.theme = nextTheme;
+    syncFavicon(nextTheme);
+  }, [controlledTheme, localTheme]);
+
+  const theme = controlledTheme ?? localTheme;
+  const setTheme = setControlledTheme ?? setLocalTheme;
 
   useEffect(() => {
     if (!selectedMonthId) return;
@@ -211,8 +368,11 @@ export function BudgetPage() {
     [month, transactionView]
   );
   const transactionCategoryLookup = useMemo(
-    () => (month ? getCategoryNameLookup(month) : {}),
-    [month]
+    () => ({
+      ...Object.fromEntries((budgetState?.categories || []).map((category) => [category.id, category.name])),
+      ...(month ? getCategoryNameLookup(month) : {})
+    }),
+    [budgetState?.categories, month]
   );
   const transactions = useMemo(
     () => (month ? getTransactions(month, transactionView) : []),
@@ -231,24 +391,32 @@ export function BudgetPage() {
   );
 
   useEffect(() => {
-    if (!sortedVisibleTransactions.length) {
-      setSelectedTransactionIds((current) => ({
-        ...current,
-        [transactionView]: null
-      }));
-      return;
-    }
+    setSelectedTransactionIds((current) => {
+      const selectedTransactionId = current[transactionView];
 
-    const selectedTransactionId = selectedTransactionIds[transactionView];
-    const exists = sortedVisibleTransactions.some((transaction) => transaction.id === selectedTransactionId);
+      if (!sortedVisibleTransactions.length) {
+        return selectedTransactionId === null
+          ? current
+          : {
+              ...current,
+              [transactionView]: null
+            };
+      }
 
-    if (!exists) {
-      setSelectedTransactionIds((current) => ({
+      const exists = sortedVisibleTransactions.some(
+        (transaction) => transaction.id === selectedTransactionId
+      );
+
+      if (exists) {
+        return current;
+      }
+
+      return {
         ...current,
         [transactionView]: sortedVisibleTransactions[0].id
-      }));
-    }
-  }, [transactionView, sortedVisibleTransactions, selectedTransactionIds]);
+      };
+    });
+  }, [transactionView, sortedVisibleTransactions]);
 
   const selectedTransactionId = selectedTransactionIds[transactionView];
   const selectedTransaction =
@@ -258,16 +426,22 @@ export function BudgetPage() {
     ? getCategories(month, selectedTransactionKind === "all" ? "expense" : selectedTransactionKind)
     : [];
 
-  function syncBudgetFromServer(nextState, { hasFullDetails = false, detailMonthId = "" } = {}) {
+  function syncBudgetFromServer(
+    nextState,
+    { hasFullDetails = false, detailMonthId = "", preferredMonthId = "" } = {}
+  ) {
     budgetStateRef.current = nextState;
     hasFullBudgetDetailsRef.current = hasFullDetails;
+    if (hasFullDetails) {
+      loadedMonthIdsRef.current = new Set(nextState.months.map((month) => month.id));
+    }
     setBudgetState(nextState);
     setHasFullBudgetDetails(hasFullDetails);
     setActiveDetailMonthId(detailMonthId);
-    setSelectedMonthId((current) => getSelectedMonthId(nextState, current));
+    setSelectedMonthId((current) => getSelectedMonthId(nextState, preferredMonthId || current));
   }
 
-  async function ensureWritableBudgetState() {
+  async function ensureWritableBudgetState({ sync = true, preferredMonthId = selectedMonthId } = {}) {
     const currentState = budgetStateRef.current;
     if (!currentState) {
       throw new Error("Budget state is not available.");
@@ -275,6 +449,14 @@ export function BudgetPage() {
 
     if (hasFullBudgetDetailsRef.current) {
       return currentState;
+    }
+
+    if (!sync) {
+      const result = await client.query({
+        query: FULL_BUDGET_DETAILS_QUERY,
+        fetchPolicy: "network-only"
+      });
+      return normalizeBudgetState(result.data.budget);
     }
 
     let cached = null;
@@ -289,10 +471,13 @@ export function BudgetPage() {
 
     if (cached?.budget) {
       const normalized = normalizeBudgetState(cached.budget);
-      syncBudgetFromServer(normalized, {
-        hasFullDetails: true,
-        detailMonthId: selectedMonthId
-      });
+      if (sync) {
+        syncBudgetFromServer(normalized, {
+          hasFullDetails: true,
+          detailMonthId: preferredMonthId,
+          preferredMonthId
+        });
+      }
       return normalized;
     }
 
@@ -301,17 +486,20 @@ export function BudgetPage() {
       fetchPolicy: "network-only"
     });
     const normalized = normalizeBudgetState(result.data.budget);
-    syncBudgetFromServer(normalized, {
-      hasFullDetails: true,
-      detailMonthId: selectedMonthId
-    });
-    setActiveMonthDetails({
-      monthId: selectedMonthId,
-      data: {
-        categoryPlans: normalized.categoryPlans,
-        transactions: normalized.transactions
-      }
-    });
+    if (sync) {
+      syncBudgetFromServer(normalized, {
+        hasFullDetails: true,
+        detailMonthId: preferredMonthId,
+        preferredMonthId
+      });
+      setActiveMonthDetails({
+        monthId: preferredMonthId,
+        data: {
+          categoryPlans: normalized.categoryPlans,
+          transactions: normalized.transactions
+        }
+      });
+    }
     return normalized;
   }
 
@@ -362,18 +550,25 @@ export function BudgetPage() {
       client.cache.gc();
 
       const nextState = normalizeBudgetState(result.data.updateBudget);
+      const requestMonthId = getSelectedMonthId(
+        nextState,
+        request.preferredMonthId || selectedMonthId
+      );
+      const hasPendingLocalSave = Boolean(controller.queued || debouncedSaveRef.current);
+      hasLocalBudgetEditRef.current = hasPendingLocalSave;
       setActiveMonthDetails({
-        monthId: selectedMonthId,
+        monthId: requestMonthId,
         data: {
           categoryPlans: nextState.categoryPlans,
           transactions: nextState.transactions
         }
       });
 
-      if (request.applyLocalSuccess && !controller.queued) {
+      if (request.applyLocalSuccess && !hasPendingLocalSave) {
         syncBudgetFromServer(nextState, {
           hasFullDetails: true,
-          detailMonthId: selectedMonthId
+          detailMonthId: requestMonthId,
+          preferredMonthId: requestMonthId
         });
       }
 
@@ -394,11 +589,34 @@ export function BudgetPage() {
     }
   }
 
-  function saveSnapshot(snapshot, { applyLocalSuccess = true } = {}) {
+  async function prepareSnapshotForSave(snapshot, { fullReplace = false, loadedMonthIds = [] } = {}) {
+    if (fullReplace || hasFullBudgetDetailsRef.current) {
+      return snapshot;
+    }
+
+    const result = await client.query({
+      query: FULL_BUDGET_DETAILS_QUERY,
+      fetchPolicy: "network-only"
+    });
+    const fullState = normalizeBudgetState(result.data.budget);
+
+    return mergeLoadedMonthDetailsIntoFullBudget(fullState, snapshot, loadedMonthIds);
+  }
+
+  async function saveSnapshot(
+    snapshot,
+    { applyLocalSuccess = true, preferredMonthId = "", fullReplace = false, loadedMonthIds = [] } = {}
+  ) {
+    const snapshotForSave = await prepareSnapshotForSave(snapshot, {
+      fullReplace,
+      loadedMonthIds
+    });
+
     return new Promise((resolve, reject) => {
       const request = {
-        snapshot,
+        snapshot: snapshotForSave,
         applyLocalSuccess,
+        preferredMonthId,
         resolve,
         reject
       };
@@ -413,28 +631,40 @@ export function BudgetPage() {
     });
   }
 
-  async function persistBudgetRecipe(recipe) {
-    const writableState = await ensureWritableBudgetState();
-    const snapshot = recipe(writableState);
-    await saveSnapshot(snapshot);
+  function scheduleSnapshotSave(snapshot, options = {}) {
+    if (debouncedSaveRef.current) {
+      window.clearTimeout(debouncedSaveRef.current);
+    }
+
+    debouncedSaveRef.current = window.setTimeout(() => {
+      debouncedSaveRef.current = null;
+      void saveSnapshot(snapshot, {
+        ...options,
+        loadedMonthIds: Array.from(loadedMonthIdsRef.current)
+      }).catch((saveFailure) => {
+        setSaveError(getErrorMessage(saveFailure));
+      });
+    }, 600);
   }
 
-  function updateBudgetState(recipe, { persist = true } = {}) {
+  function updateBudgetState(recipe, { persist = true, preferredMonthId = "" } = {}) {
     const currentState = budgetStateRef.current;
     if (!currentState) return;
 
     const nextSnapshot = recipe(currentState);
+    hasLocalBudgetEditRef.current = persist;
     budgetStateRef.current = nextSnapshot;
     setBudgetState(nextSnapshot);
 
     if (persist) {
-      void persistBudgetRecipe(recipe).catch((saveFailure) => {
-        setSaveError(getErrorMessage(saveFailure));
-      });
+      scheduleSnapshotSave(nextSnapshot, { preferredMonthId });
     }
   }
 
   function patchMonth(recipe, options) {
+    if (selectedMonthId && removableNewMonthIdRef.current === selectedMonthId) {
+      removableNewMonthIdRef.current = "";
+    }
     updateBudgetState((current) => patchCurrentMonth(current, selectedMonthId, recipe), options);
   }
 
@@ -452,18 +682,44 @@ export function BudgetPage() {
     resetTransactionSelection();
   }
 
-  function handleMonthRemove() {
+  async function handleMonthRemove() {
     if (!budgetState || budgetState.months.length === 1 || !month) return;
 
-    const ordered = budgetState.months.slice().sort((a, b) => a.id.localeCompare(b.id));
+    const isFreshUntouchedMonth =
+      removableNewMonthIdRef.current === selectedMonthId &&
+      month.transactions.length === 0;
+    const monthHasData =
+      month.transactions.length > 0 ||
+      month.categories.some((category) => toAmount(category.planned) !== 0) ||
+      toAmount(month.startingBalance) !== 0;
+
+    if (
+      !isFreshUntouchedMonth &&
+      monthHasData &&
+      !window.confirm(`Remove ${month.name}? This will permanently delete that month's budget data.`)
+    ) {
+      return;
+    }
+
+    let writableState;
+    try {
+      writableState = await ensureWritableBudgetState({ sync: false });
+    } catch (loadError) {
+      setSaveError(getErrorMessage(loadError));
+      return;
+    }
+
+    const ordered = writableState.months.slice().sort((a, b) => a.id.localeCompare(b.id));
     const index = ordered.findIndex((entry) => entry.id === selectedMonthId);
     const fallback = ordered[index - 1] || ordered[index + 1];
 
-    updateBudgetState((current) => {
+    if (!fallback) return;
+
+    const nextState = ((current) => {
       const nextMonths = current.months.filter((entry) => entry.id !== selectedMonthId);
       const nextCategoryPlans = current.categoryPlans.filter((link) => link.monthId !== selectedMonthId);
       const nextTransactions = current.transactions.filter(
-        (transaction) => transaction.monthId !== month.id
+        (transaction) => !transactionFallsInMonth(transaction, month)
       );
 
       return {
@@ -472,24 +728,58 @@ export function BudgetPage() {
         categoryPlans: nextCategoryPlans,
         transactions: nextTransactions
       };
-    });
+    })(writableState);
+
+    updateBudgetState(() => nextState, { preferredMonthId: fallback.id });
+    if (removableNewMonthIdRef.current === selectedMonthId) {
+      removableNewMonthIdRef.current = "";
+    }
     setSelectedMonthId(fallback.id);
+    if (
+      hasFullBudgetDetailsRef.current ||
+      budgetStateRef.current?.categoryPlans.some((plan) => plan.monthId === fallback.id)
+    ) {
+      setActiveDetailMonthId(fallback.id);
+    }
     resetTransactionSelection();
   }
 
-  function handleMonthAdd() {
-    const currentState = budgetStateRef.current;
-    if (!currentState || !month) return;
+  async function handleMonthAdd() {
+    if (!budgetStateRef.current || !month) return;
 
-    const nextState = addMonth(currentState, selectedMonthId);
+    let writableState;
+    try {
+      writableState = await ensureWritableBudgetState({ sync: false });
+    } catch (loadError) {
+      setSaveError(getErrorMessage(loadError));
+      return;
+    }
+
+    const nextState = addMonth(writableState, selectedMonthId);
     const nextMonthId = nextState.months
       .slice()
       .sort((a, b) => a.id.localeCompare(b.id))
       .at(-1)?.id;
 
-    updateBudgetState(() => nextState);
     if (nextMonthId) {
+      updateBudgetState(() => nextState, { preferredMonthId: nextMonthId });
+      removableNewMonthIdRef.current = nextMonthId;
       setSelectedMonthId(nextMonthId);
+      setActiveDetailMonthId(nextMonthId);
+      setActiveMonthDetails({
+        monthId: nextMonthId,
+        data: {
+          categoryPlans: nextState.categoryPlans.filter((plan) => plan.monthId === nextMonthId),
+          transactions: nextState.transactions.filter((transaction) =>
+            transactionFallsInMonth(
+              transaction,
+              nextState.months.find((entry) => entry.id === nextMonthId)
+            )
+          )
+        }
+      });
+    } else {
+      updateBudgetState(() => nextState);
     }
     resetTransactionSelection();
   }
@@ -570,7 +860,7 @@ export function BudgetPage() {
 
     const transaction = {
       id: crypto.randomUUID(),
-      date: new Date().toISOString().slice(0, 10),
+      date: getDraftTransactionDate(month),
       amount: 0,
       description: "",
       categoryId: transactionCategories[0].id,
@@ -637,7 +927,7 @@ export function BudgetPage() {
   }
 
   async function replaceServerBudget(nextState) {
-    const savedState = await saveSnapshot(nextState, { applyLocalSuccess: true });
+    const savedState = await saveSnapshot(nextState, { applyLocalSuccess: true, fullReplace: true });
     syncBudgetFromServer(savedState, {
       hasFullDetails: true,
       detailMonthId: selectedMonthId
@@ -671,7 +961,19 @@ export function BudgetPage() {
 
   async function handleReset() {
     try {
-      await replaceServerBudget(normalizeBudgetState(createSampleState()));
+      if (
+        !window.confirm(
+          hasBudgetData(budgetStateRef.current)
+            ? "Clear all budget data for this account? This will permanently remove months, plans, and transactions."
+            : "Clear this budget and keep a single empty month?"
+        )
+      ) {
+        return;
+      }
+
+      const currentState = await ensureWritableBudgetState({ sync: false });
+      removableNewMonthIdRef.current = "";
+      await replaceServerBudget(buildEmptyBudgetState(currentState));
     } catch (resetError) {
       window.alert(getErrorMessage(resetError));
     }
@@ -707,6 +1009,7 @@ export function BudgetPage() {
   return (
     <div className="app-shell">
       <TopBar
+        user={user}
         theme={theme}
         currency={budgetState.currency || "CAD"}
         showCurrencyCode={showCurrencyCode}
@@ -721,14 +1024,13 @@ export function BudgetPage() {
         onExport={handleExport}
         onImport={handleImport}
         onReset={handleReset}
+        onLogout={onLogout}
       />
 
-      {(saveError || monthLoadError || isSaving) && (
-        <section className="panel">
-          <p className="section-label">
-            {saveError ? "Save Error" : monthLoadError ? "Month Load Error" : "Saving"}
-          </p>
-          <p>{saveError || monthLoadError || "Syncing budget changes to the API."}</p>
+      {(saveError || monthLoadError) && (
+        <section className="panel status-toast">
+          <p className="section-label">{saveError ? "Save Error" : "Month Load Error"}</p>
+          <p>{saveError || monthLoadError}</p>
         </section>
       )}
 
@@ -781,7 +1083,6 @@ export function BudgetPage() {
           {isCurrentMonthLoaded ? (
             <TransactionPanel
               view={transactionView}
-              categories={transactionCategories}
               categoryLookup={transactionCategoryLookup}
               transactions={sortedVisibleTransactions}
               selectedTransaction={selectedTransaction}

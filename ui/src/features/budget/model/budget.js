@@ -1,4 +1,3 @@
-import { createSampleState } from "./sampleState.js";
 import { toAmount } from "../../../shared/lib/format.js";
 
 function parseMonthId(value) {
@@ -17,21 +16,6 @@ function parseMonthId(value) {
 
 function buildMonthDate(year, month, day, hours, minutes, seconds, milliseconds) {
   return new Date(Date.UTC(year, month - 1, day, hours, minutes, seconds, milliseconds)).toISOString();
-}
-
-function getMonthIdFromDateLike(value) {
-  if (!value) return "";
-
-  if (typeof value === "string" && /^\d{4}-\d{2}/.test(value)) {
-    return value.slice(0, 7);
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return "";
-  }
-
-  return `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 function getStartAtForMonth(monthId) {
@@ -58,18 +42,6 @@ function formatMonthName(monthId) {
   });
 }
 
-function normalizeBoundary(value, monthId, boundary) {
-  if (typeof value === "string" && value.includes("T")) {
-    return value;
-  }
-
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return `${value}${boundary === "start" ? "T00:00:00.000Z" : "T23:59:59.999Z"}`;
-  }
-
-  return boundary === "start" ? getStartAtForMonth(monthId) : getEndAtForMonth(monthId);
-}
-
 function normalizeOccurredAt(value, fallbackMonthId) {
   if (typeof value === "string" && value.includes("T")) {
     return value;
@@ -86,47 +58,37 @@ function normalizeOccurredAt(value, fallbackMonthId) {
   return "1970-01-01T12:00:00.000Z";
 }
 
-function hasLinkStateShape(state) {
-  return (
-    Array.isArray(state?.months) &&
-    Array.isArray(state?.categories) &&
-    (Array.isArray(state?.categoryPlans) || Array.isArray(state?.categoryLinks))
-  );
-}
+function getTransactionOccurredAt(transaction, fallbackMonthId) {
+  const date = transaction.date;
+  const occurredAt = transaction.occurredAt;
 
-function hasFlatStateShape(state) {
-  return (
-    Array.isArray(state?.months) &&
-    Array.isArray(state?.categories) &&
-    Array.isArray(state?.transactions)
-  );
-}
+  if (
+    typeof date === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(date) &&
+    (!occurredAt || occurredAt.slice(0, 10) !== date)
+  ) {
+    return normalizeOccurredAt(date, fallbackMonthId);
+  }
 
-function hasNormalizedMonthShape(month) {
-  return Array.isArray(month?.categories) && Array.isArray(month?.transactions);
-}
-
-function slugify(value) {
-  return String(value || "")
-    .toLowerCase()
-    .trim()
-    .replaceAll(/[^a-z0-9]+/g, "-")
-    .replaceAll(/^-+|-+$/g, "");
+  return normalizeOccurredAt(occurredAt || date, fallbackMonthId);
 }
 
 function findMonthIdForOccurredAt(months, occurredAt) {
   return months.find((month) => occurredAt >= month.startAt && occurredAt <= month.endAt)?.id || "";
 }
 
+function dateFallsInMonth(occurredAt, month) {
+  return occurredAt >= month.startAt && occurredAt <= month.endAt;
+}
+
 function normalizeMonthRecord(month) {
-  const inferredId =
-    String(month?.id || month?.monthKey || getMonthIdFromDateLike(month?.startAt || month?.startDate) || "");
+  const id = String(month?.id || "");
 
   return {
-    id: inferredId,
-    startAt: normalizeBoundary(month?.startAt || month?.startDate, inferredId, "start"),
-    endAt: normalizeBoundary(month?.endAt || month?.endDate, inferredId, "end"),
-    name: month?.name || formatMonthName(inferredId),
+    id,
+    startAt: month?.startAt || getStartAtForMonth(id),
+    endAt: month?.endAt || getEndAtForMonth(id),
+    name: month?.name || formatMonthName(id),
     startingBalance: toAmount(month?.startingBalance)
   };
 }
@@ -141,7 +103,7 @@ function normalizeCategoryDefinition(category) {
 
 function normalizeCategoryPlan(link) {
   return {
-    id: String(link.id || `${link.monthId}:${link.categoryId}`),
+    id: String(link.id),
     monthId: String(link.monthId),
     categoryId: String(link.categoryId),
     planned: toAmount(link.planned),
@@ -151,18 +113,17 @@ function normalizeCategoryPlan(link) {
 
 function normalizeTransactionRecord(transaction, months, fallbackMonthId) {
   const occurredAt = normalizeOccurredAt(
-    transaction?.occurredAt || transaction?.date || transaction?.occurredOn,
-    fallbackMonthId || String(transaction?.monthId || transaction?.monthKey || "")
+    transaction?.occurredAt,
+    fallbackMonthId
   );
   const monthId =
-    String(transaction?.monthId || "") ||
     findMonthIdForOccurredAt(months, occurredAt) ||
-    String(transaction?.monthKey || getMonthIdFromDateLike(occurredAt) || fallbackMonthId || "");
+    fallbackMonthId ||
+    "";
 
   return {
     id: String(transaction.id),
     occurredAt,
-    date: occurredAt.slice(0, 10),
     amount: toAmount(transaction.amount),
     description: transaction.description || "",
     categoryId: String(transaction.categoryId),
@@ -173,232 +134,24 @@ function normalizeTransactionRecord(transaction, months, fallbackMonthId) {
   };
 }
 
-function buildCanonicalCategoryRegistry() {
-  const bySignature = new Map();
-  const categories = [];
-
-  function register(categoryLike, fallbackType) {
-    const name = categoryLike.name;
-    const type = categoryLike.type || fallbackType || "expense";
-    const signature = `${type}:${slugify(name)}`;
-
-    if (bySignature.has(signature)) {
-      return bySignature.get(signature);
-    }
-
-    const rawId = String(categoryLike.id || slugify(name) || crypto.randomUUID());
-    const preferredId = rawId.includes(":") ? rawId.split(":").pop() : rawId;
-    let canonicalId = preferredId;
-    let suffix = 2;
-
-    while (categories.some((entry) => entry.id === canonicalId)) {
-      canonicalId = `${preferredId}-${suffix++}`;
-    }
-
-    const definition = {
-      id: canonicalId,
-      name,
-      type
-    };
-
-    categories.push(definition);
-    bySignature.set(signature, definition);
-    return definition;
-  }
-
-  return {
-    categories,
-    register
-  };
-}
-
-function flattenMonth(month, registry) {
-  const monthRecord = normalizeMonthRecord(month);
-  const categoryPlans = [];
-
-  const normalizedCategories = hasNormalizedMonthShape(month)
-    ? month.categories.map((category) => ({
-        ...category,
-        type: category.type || "expense"
-      }))
-    : [
-        ...(month.expenseCategories || []).map((category) => ({ ...category, type: "expense" })),
-        ...(month.incomeCategories || []).map((category) => ({ ...category, type: "income" }))
-      ];
-
-  normalizedCategories.forEach((category, index) => {
-    const definition = registry.register(category, category.type);
-    categoryPlans.push({
-      id: `${monthRecord.id}:${definition.id}`,
-      monthId: monthRecord.id,
-      categoryId: definition.id,
-      planned: toAmount(category.planned),
-      sortOrder: index
-    });
-  });
-
-  const normalizedTransactions = hasNormalizedMonthShape(month)
-    ? month.transactions
-    : [
-        ...(month.expenseTransactions || []).map((transaction) => ({
-          ...transaction,
-          type: "expense"
-        })),
-        ...(month.incomeTransactions || []).map((transaction) => ({
-          ...transaction,
-          type: "income"
-        }))
-      ];
-
-  const transactions = normalizedTransactions.map((transaction) => {
-    const linkedCategory = normalizedCategories.find(
-      (category) => String(category.id) === String(transaction.categoryId)
-    );
-    const definition = linkedCategory
-      ? registry.register(linkedCategory, linkedCategory.type)
-      : registry.register(
-          {
-            id: transaction.categoryId,
-            name: transaction.categoryId,
-            type: transaction.type
-          },
-          transaction.type
-        );
-
-    return normalizeTransactionRecord(
-      {
-        ...transaction,
-        categoryId: definition.id
-      },
-      [monthRecord],
-      monthRecord.id
-    );
-  });
-
-  return {
-    month: monthRecord,
-    categoryPlans,
-    transactions
-  };
-}
-
-function convertLegacyFlatState(state) {
-  const registry = buildCanonicalCategoryRegistry();
-  const months = state.months.map(normalizeMonthRecord);
-  const monthIds = new Set(months.map((month) => month.id));
-  const categoryPlans = [];
-
-  (state.categories || []).forEach((category, index) => {
-    if (!monthIds.has(String(category.monthId))) {
-      return;
-    }
-
-    const definition = registry.register(category, category.type);
-    categoryPlans.push({
-      id: `${category.monthId}:${definition.id}`,
-      monthId: String(category.monthId),
-      categoryId: definition.id,
-      planned: toAmount(category.planned),
-      sortOrder: Number.isFinite(category.sortOrder) ? category.sortOrder : index
-    });
-  });
-
-  const transactions = (state.transactions || [])
-    .map((transaction) => normalizeTransactionRecord(transaction, months))
-    .filter((transaction) => monthIds.has(transaction.monthId))
-    .map((transaction) => {
-      const matchingLegacyCategory = (state.categories || []).find(
-        (category) =>
-          String(category.id) === String(transaction.categoryId) ||
-          String(category.id).split(":").pop() === String(transaction.categoryId)
-      );
-
-      if (matchingLegacyCategory) {
-        const definition = registry.register(matchingLegacyCategory, matchingLegacyCategory.type);
-        return {
-          ...transaction,
-          categoryId: definition.id
-        };
-      }
-
-      const inferredDefinition = registry.register(
-        {
-          id: transaction.categoryId,
-          name: transaction.categoryId,
-          type: transaction.type
-        },
-        transaction.type
-      );
-
-      return {
-        ...transaction,
-        categoryId: inferredDefinition.id
-      };
-    });
-
-  return {
-    id: state.id,
-    name: state.name,
-    currency: state.currency || "CAD",
-    months,
-    categories: registry.categories.map(normalizeCategoryDefinition),
-    categoryPlans,
-    transactions
-  };
-}
-
 export function normalizeBudgetState(state) {
-  if (!state?.months?.length) {
-    return normalizeBudgetState(createSampleState());
-  }
-
-  if (hasLinkStateShape(state)) {
-    const months = (state.months || []).map(normalizeMonthRecord);
-    const monthIds = new Set(months.map((month) => month.id));
-    const categories = (state.categories || []).map(normalizeCategoryDefinition);
-    const categoryIds = new Set(categories.map((category) => category.id));
-    const rawCategoryPlans = state.categoryPlans || state.categoryLinks || [];
-    const rawTransactions =
-      state.transactions?.length
-        ? state.transactions
-        : state.months.flatMap((month) =>
-            (month.transactions || []).map((transaction) => ({
-              ...transaction,
-              monthId: month.id
-            }))
-          );
-
-    return {
-      id: state.id,
-      name: state.name,
-      currency: state.currency || "CAD",
-      months,
-      categories,
-      categoryPlans: rawCategoryPlans
-        .map(normalizeCategoryPlan)
-        .filter((link) => monthIds.has(link.monthId) && categoryIds.has(link.categoryId)),
-      transactions: (rawTransactions || [])
-        .map((transaction) => normalizeTransactionRecord(transaction, months))
-        .filter((transaction) => monthIds.has(transaction.monthId) && categoryIds.has(transaction.categoryId))
-    };
-  }
-
-  if (hasFlatStateShape(state)) {
-    return convertLegacyFlatState(state);
-  }
-
-  const registry = buildCanonicalCategoryRegistry();
-  const flattened = state.months.map((month) => flattenMonth(month, registry));
-  const months = flattened.map((entry) => entry.month);
+  const months = (state?.months || []).map(normalizeMonthRecord);
+  const monthIds = new Set(months.map((month) => month.id));
+  const categories = (state?.categories || []).map(normalizeCategoryDefinition);
+  const categoryIds = new Set(categories.map((category) => category.id));
 
   return {
-    id: state.id,
-    name: state.name,
-    currency: state.currency || "CAD",
+    id: state?.id,
+    name: state?.name,
+    currency: state?.currency || "CAD",
     months,
-    categories: registry.categories.map(normalizeCategoryDefinition),
-    categoryPlans: flattened.flatMap((entry) => entry.categoryPlans),
-    transactions: flattened.flatMap((entry) => entry.transactions)
+    categories,
+    categoryPlans: (state?.categoryPlans || [])
+      .map(normalizeCategoryPlan)
+      .filter((link) => monthIds.has(link.monthId) && categoryIds.has(link.categoryId)),
+    transactions: (state?.transactions || [])
+      .map((transaction) => normalizeTransactionRecord(transaction, months))
+      .filter((transaction) => monthIds.has(transaction.monthId) && categoryIds.has(transaction.categoryId))
   };
 }
 
@@ -424,10 +177,9 @@ function hydrateMonth(state, month) {
 
   return {
     ...month,
-    monthKey: month.id,
     categories,
     transactions: state.transactions
-      .filter((transaction) => transaction.monthId === month.id)
+      .filter((transaction) => dateFallsInMonth(transaction.occurredAt, month))
       .map((transaction) => ({
         ...transaction,
         date: transaction.occurredAt.slice(0, 10)
@@ -447,6 +199,7 @@ export function getSelectedMonthId(state, preferredMonthId) {
 export function getCurrentMonth(state, selectedMonthId) {
   const resolvedMonthId = getSelectedMonthId(state, selectedMonthId);
   const month = state.months.find((entry) => entry.id === resolvedMonthId) || state.months[0];
+  if (!month) return null;
   return hydrateMonth(state, month);
 }
 
@@ -538,22 +291,17 @@ export function patchCurrentMonth(state, selectedMonthId, recipe) {
   });
 
   const nextTransactions = [
-    ...state.transactions.filter((transaction) => transaction.monthId !== currentMonth.id),
+    ...state.transactions.filter((transaction) => !dateFallsInMonth(transaction.occurredAt, currentMonth)),
     ...(nextMonth.transactions || []).map((transaction) => {
-      const occurredAt = normalizeOccurredAt(
-        transaction.occurredAt || transaction.date,
-        currentMonth.id
-      );
+      const occurredAt = getTransactionOccurredAt(transaction, currentMonth.id);
 
       return {
         id: String(transaction.id),
         occurredAt,
-        date: occurredAt.slice(0, 10),
         amount: toAmount(transaction.amount),
         description: transaction.description || "",
         categoryId: String(transaction.categoryId),
         type: transaction.type || "expense",
-        monthId: findMonthIdForOccurredAt(state.months, occurredAt) || currentMonth.id,
         createdAt: transaction.createdAt || undefined,
         updatedAt: transaction.updatedAt || undefined
       };

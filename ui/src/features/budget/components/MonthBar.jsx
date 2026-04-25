@@ -1,12 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toAmount } from "../../../shared/lib/format";
 
-function easeInOutCubic(progress) {
-  return progress < 0.5
-    ? 4 * progress * progress * progress
-    : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-}
-
 export function MonthBar({
   state,
   month,
@@ -23,8 +17,6 @@ export function MonthBar({
   const actualTotal = month.startingBalance + totals.actualNet;
   const monthTabsRef = useRef(null);
   const activeMonthTabRef = useRef(null);
-  const hasMountedRef = useRef(false);
-  const animationFrameRef = useRef(0);
   const [startingBalanceInput, setStartingBalanceInput] = useState(
     month.startingBalance.toFixed(2)
   );
@@ -33,60 +25,31 @@ export function MonthBar({
     setStartingBalanceInput(month.startingBalance.toFixed(2));
   }, [month.id, month.startingBalance]);
 
-  function centerActiveMonth(behavior = "smooth") {
+  function revealActiveMonth() {
     if (!monthTabsRef.current || !activeMonthTabRef.current) {
       return;
     }
 
     const container = monthTabsRef.current;
     const activeTab = activeMonthTabRef.current;
-    const targetLeft =
-      activeTab.offsetLeft - container.clientWidth / 2 + activeTab.clientWidth / 2;
-    const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
-    const nextLeft = Math.max(0, Math.min(targetLeft, maxScrollLeft));
+    const inset = 8;
+    const visibleLeft = container.scrollLeft;
+    const visibleRight = visibleLeft + container.clientWidth;
+    const activeLeft = activeTab.offsetLeft;
+    const activeRight = activeLeft + activeTab.clientWidth;
 
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = 0;
-    }
-
-    if (behavior === "auto") {
-      container.scrollLeft = nextLeft;
+    if (activeLeft < visibleLeft + inset) {
+      container.scrollLeft = Math.max(0, activeLeft - inset);
       return;
     }
 
-    const startLeft = container.scrollLeft;
-    const distance = nextLeft - startLeft;
-    const duration = 420;
-    const startTime = performance.now();
-
-    function animate(now) {
-      const elapsed = now - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      const eased = easeInOutCubic(progress);
-
-      container.scrollLeft = startLeft + distance * eased;
-
-      if (progress < 1) {
-        animationFrameRef.current = requestAnimationFrame(animate);
-      } else {
-        animationFrameRef.current = 0;
-      }
+    if (activeRight > visibleRight - inset) {
+      container.scrollLeft = activeRight - container.clientWidth + inset;
     }
-
-    animationFrameRef.current = requestAnimationFrame(animate);
   }
 
   useLayoutEffect(() => {
-    if (!hasMountedRef.current) {
-      hasMountedRef.current = true;
-      centerActiveMonth("auto");
-      return;
-    }
-
-    requestAnimationFrame(() => {
-      centerActiveMonth("smooth");
-    });
+    revealActiveMonth();
   }, [state.selectedMonthId]);
 
   useEffect(() => {
@@ -96,23 +59,19 @@ export function MonthBar({
 
     frame1 = requestAnimationFrame(() => {
       frame2 = requestAnimationFrame(() => {
-        centerActiveMonth("auto");
+        revealActiveMonth();
       });
     });
 
     function handleWindowLoad() {
       timeoutId = window.setTimeout(() => {
-        centerActiveMonth("auto");
+        revealActiveMonth();
       }, 0);
     }
 
     window.addEventListener("load", handleWindowLoad);
 
     return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = 0;
-      }
       cancelAnimationFrame(frame1);
       cancelAnimationFrame(frame2);
       window.removeEventListener("load", handleWindowLoad);
@@ -179,19 +138,31 @@ export function MonthBar({
           <div className="mini-stat">
             <div className="mini-stat-label">Planned Total</div>
             <div className={`mini-stat-value ${plannedTotal >= 0 ? "positive" : "negative"}`}>
-              {formatCurrency(plannedTotal)}
+              {disabled ? (
+                <span className="stat-placeholder stat-placeholder-money" aria-hidden="true" />
+              ) : (
+                formatCurrency(plannedTotal)
+              )}
             </div>
           </div>
           <div className="mini-stat">
             <div className="mini-stat-label">Actual Total</div>
             <div className={`mini-stat-value ${actualTotal >= 0 ? "positive" : "negative"}`}>
-              {formatCurrency(actualTotal)}
+              {disabled ? (
+                <span className="stat-placeholder stat-placeholder-money" aria-hidden="true" />
+              ) : (
+                formatCurrency(actualTotal)
+              )}
             </div>
           </div>
           <div className="mini-stat">
             <div className="mini-stat-label">Transactions</div>
             <div className="mini-stat-value">
-              {disabled ? "…" : month.transactions.length}
+              {disabled ? (
+                <span className="stat-placeholder" aria-hidden="true" />
+              ) : (
+                month.transactions.length
+              )}
             </div>
           </div>
         </div>

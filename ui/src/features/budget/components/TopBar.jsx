@@ -63,8 +63,21 @@ function ResetIcon() {
   return (
     <IconWrap>
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M20 11a8 8 0 1 0 2 5.3" />
-        <path d="M20 4v7h-7" />
+        <path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" />
+        <path d="M4.5 5.5v5h5" />
+        <circle cx="12" cy="12" r="2.2" />
+      </svg>
+    </IconWrap>
+  );
+}
+
+function LogoutIcon() {
+  return (
+    <IconWrap>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+        <path d="m16 17 5-5-5-5" />
+        <path d="M21 12H9" />
       </svg>
     </IconWrap>
   );
@@ -82,6 +95,7 @@ function ToolbarButton({ label, onClick, icon, title }) {
 }
 
 export function TopBar({
+  user,
   theme,
   currency,
   showCurrencyCode,
@@ -90,7 +104,8 @@ export function TopBar({
   onCurrencyCodeToggle,
   onExport,
   onImport,
-  onReset
+  onReset,
+  onLogout
 }) {
   return (
     <header className="topbar">
@@ -100,6 +115,11 @@ export function TopBar({
         <p className="hero-copy">
           Plan the month, adjust when life shifts, and keep the numbers close.
         </p>
+        {user && (
+          <p className="hero-copy auth-identity">
+            Signed in as <strong>{user.displayName}</strong> <span>{user.email}</span>
+          </p>
+        )}
       </div>
       <div className="hero-actions">
         <label className="toolbar-field">
@@ -138,6 +158,7 @@ export function TopBar({
           </span>
         </label>
         <ToolbarButton label="Reset" onClick={onReset} icon={<ResetIcon />} title="Reset" />
+        <ToolbarButton label="Logout" onClick={onLogout} icon={<LogoutIcon />} title="Logout" />
       </div>
     </header>
   );

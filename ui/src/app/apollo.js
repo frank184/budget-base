@@ -1,5 +1,7 @@
 import { ApolloClient, ApolloLink, HttpLink, InMemoryCache, Observable } from "@apollo/client";
 
+import { ensureValidAccessToken, getAccessToken, getApiBaseUrl, logoutSession } from "../auth/session";
+
 const isApolloDebugEnabled = import.meta.env.DEV && import.meta.env.VITE_APOLLO_DEBUG !== "false";
 
 function getOperationLabel(operation) {
@@ -19,7 +21,6 @@ function createApolloDebugLink() {
         ?.operation || "query";
     const variables = Object.keys(operation.variables || {});
 
-    // Keep client-side logging compact and focused on transport/debug context.
     console.info("[apollo] start", {
       operationName,
       operationType,
@@ -71,11 +72,49 @@ function createApolloDebugLink() {
   });
 }
 
+function createAuthLink() {
+  return new ApolloLink((operation, forward) => {
+    return new Observable((observer) => {
+      let subscription;
+
+      Promise.resolve()
+        .then(async () => {
+          const currentToken = getAccessToken();
+          const accessToken = currentToken ? await ensureValidAccessToken() : null;
+
+          operation.setContext(({ headers = {} }) => ({
+            headers: {
+              ...headers,
+              ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {})
+            }
+          }));
+
+          subscription = forward(operation).subscribe({
+            next: (value) => observer.next(value),
+            error: async (error) => {
+              const statusCode = error?.statusCode || error?.networkError?.statusCode;
+              if (statusCode === 401) {
+                await logoutSession();
+              }
+              observer.error(error);
+            },
+            complete: () => observer.complete()
+          });
+        })
+        .catch((error) => observer.error(error));
+
+      return () => subscription?.unsubscribe();
+    });
+  });
+}
+
 export const apolloClient = new ApolloClient({
   link: ApolloLink.from([
     createApolloDebugLink(),
+    createAuthLink(),
     new HttpLink({
-      uri: "/graphql"
+      uri: `${getApiBaseUrl()}/graphql`,
+      credentials: "include"
     })
   ]),
   cache: new InMemoryCache({

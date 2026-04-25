@@ -2,6 +2,7 @@ export type BudgetEntryType = "income" | "expense";
 
 export interface BudgetRecord {
   id: number;
+  ownerUserId?: number;
   name: string;
   currency: string;
 }

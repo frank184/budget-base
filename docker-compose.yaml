@@ -5,7 +5,7 @@ services:
     environment:
       CHOKIDAR_USEPOLLING: "true"
       VITE_APOLLO_DEBUG: "true"
-      VITE_GRAPHQL_PROXY_TARGET: "http://api:3001"
+      VITE_API_BASE_URL: "${VITE_API_BASE_URL:-http://127.0.0.1:3001}"
     ports:
       - "5173:5173"
     volumes:
@@ -22,12 +22,22 @@ services:
     build:
       context: ./api
     command: npm run dev
+    env_file: .env
     environment:
       HOST: 0.0.0.0
       PORT: 3001
       LOG_LEVEL: debug
       GRAPHQL_DEBUG: "true"
       CHOKIDAR_USEPOLLING: "true"
+      UI_BASE_URL: "${UI_BASE_URL:-http://127.0.0.1:5173}"
+      API_BASE_URL: "${API_BASE_URL:-http://127.0.0.1:3001}"
+      GOOGLE_CALLBACK_URL: "${GOOGLE_CALLBACK_URL:-http://127.0.0.1:3001/auth/google/callback}"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      JWT_ACCESS_SECRET: "${JWT_ACCESS_SECRET:-dev-access-secret}"
+      JWT_REFRESH_SECRET: "${JWT_REFRESH_SECRET:-dev-refresh-secret}"
+      COOKIE_SECURE: "false"
+      COOKIE_SAME_SITE: "lax"
     ports:
       - "3001:3001"
     healthcheck:
