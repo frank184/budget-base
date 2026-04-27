@@ -4,17 +4,18 @@ import { MercuriusDriver, MercuriusDriverConfig } from "@nestjs/mercurius";
 
 import { AuthModule } from "./auth/auth.module";
 import { BudgetModule } from "./budget/budget.module";
-import { DatabaseModule } from "./database/database.module";
+import { GraphiqlController } from "./graphiql.controller";
 import { HealthController } from "./health.controller";
+import { PrismaModule } from "./prisma/prisma.module";
 
 @Module({
   imports: [
-    DatabaseModule,
+    PrismaModule,
     GraphQLModule.forRoot<MercuriusDriverConfig>({
       driver: MercuriusDriver,
       autoSchemaFile: true,
       path: "/graphql",
-      graphiql: true,
+      graphiql: false,
       sortSchema: true,
       context: (req, reply) => ({
         req,
@@ -24,6 +25,6 @@ import { HealthController } from "./health.controller";
     BudgetModule,
     AuthModule
   ],
-  controllers: [HealthController]
+  controllers: [HealthController, GraphiqlController]
 })
 export class AppModule {}

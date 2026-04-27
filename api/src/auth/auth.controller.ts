@@ -81,7 +81,7 @@ export class AuthController {
 
   @Post("logout")
   async logout(@Req() request: FastifyRequest, @Res() reply: FastifyReply) {
-    this.authService.revokeRefreshToken(request.cookies[this.authService.refreshCookieName]);
+    await this.authService.revokeRefreshToken(request.cookies[this.authService.refreshCookieName]);
     reply.clearCookie(this.authService.refreshCookieName, { path: "/" });
     return reply.status(204).send();
   }

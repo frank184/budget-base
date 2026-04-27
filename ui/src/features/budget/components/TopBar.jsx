@@ -63,9 +63,9 @@ function ResetIcon() {
   return (
     <IconWrap>
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" />
-        <path d="M4.5 5.5v5h5" />
-        <circle cx="12" cy="12" r="2.2" />
+        <path d="M7.2 7.2A6.4 6.4 0 1 1 5.8 12" />
+        <path d="M7.2 4.6v2.6H4.6" />
+        <circle cx="12" cy="12" r="1.35" />
       </svg>
     </IconWrap>
   );

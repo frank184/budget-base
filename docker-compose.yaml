@@ -1,4 +1,22 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: budget_base
+      POSTGRES_USER: budget_base
+      POSTGRES_PASSWORD: budget_base
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U budget_base -d budget_base"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
   ui:
     build:
       context: ./ui
@@ -22,7 +40,7 @@ services:
     build:
       context: ./api
     command: npm run dev
-    env_file: .env
+    env_file: api/.env
     environment:
       HOST: 0.0.0.0
       PORT: 3001
@@ -38,8 +56,12 @@ services:
       JWT_REFRESH_SECRET: "${JWT_REFRESH_SECRET:-dev-refresh-secret}"
       COOKIE_SECURE: "false"
       COOKIE_SAME_SITE: "lax"
+      DATABASE_URL: "${DATABASE_URL:-postgresql://budget_base:budget_base@postgres:5432/budget_base?schema=public}"
     ports:
       - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 5s
@@ -48,6 +70,8 @@ services:
       start_period: 5s
     volumes:
       - ./api/src:/app/src
+      - ./api/prisma:/app/prisma
+      - ./api/scripts:/app/scripts
       - ./api/data:/app/data
       - ./api/tsconfig.json:/app/tsconfig.json
     restart: unless-stopped
@@ -55,3 +79,4 @@ services:
 volumes:
   ui_node_modules:
   api_node_modules:
+  postgres_data:

@@ -12,12 +12,18 @@ export class AuthGuard implements CanActivate {
     const request = this.getRequest(context);
     const authorizationHeader = request.headers.authorization;
 
-    if (!authorizationHeader?.startsWith("Bearer ")) {
-      throw new UnauthorizedException("Missing bearer token.");
+    if (authorizationHeader?.startsWith("Bearer ")) {
+      const token = authorizationHeader.slice("Bearer ".length).trim();
+      request.user = await this.authService.verifyAccessToken(token);
+      return true;
     }
 
-    const token = authorizationHeader.slice("Bearer ".length).trim();
-    request.user = await this.authService.verifyAccessToken(token);
+    const refreshToken = request.cookies?.[this.authService.refreshCookieName];
+    if (!refreshToken) {
+      throw new UnauthorizedException("Missing bearer token or session cookie.");
+    }
+
+    request.user = await this.authService.getCurrentUserFromRefreshToken(refreshToken);
     return true;
   }
 

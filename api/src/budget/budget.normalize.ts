@@ -270,6 +270,10 @@ function normalizeTransaction(transaction: BudgetTransactionRecord) {
   } satisfies BudgetTransactionRecord;
 }
 
+function uniqueById<T extends { id: string }>(records: T[]) {
+  return Array.from(new Map(records.map((record) => [record.id, record])).values());
+}
+
 function buildCategoryRegistry() {
   const bySignature = new Map<string, BudgetCategoryRecord>();
   const categories: BudgetCategoryRecord[] = [];
@@ -450,6 +454,16 @@ export function normalizeBudgetState(input: unknown): BudgetState {
     const categories = input.categories.map(normalizeCategory);
     const categoryIds = new Set(categories.map((category) => category.id));
     const rawCategoryPlans = typedInput.categoryPlans || typedInput.categoryLinks || [];
+    const categoryPlans = rawCategoryPlans
+      .map(normalizeCategoryPlan)
+      .filter((link) => monthIds.has(link.monthId) && categoryIds.has(link.categoryId));
+    const transactions = input.transactions
+      .map(normalizeTransaction)
+      .filter(
+        (transaction) =>
+          months.some((month) => dateFallsInMonth(transaction.occurredAt, month)) &&
+          categoryIds.has(transaction.categoryId)
+      );
 
     return {
       id: typeof input.id === "number" ? input.id : undefined,
@@ -457,16 +471,8 @@ export function normalizeBudgetState(input: unknown): BudgetState {
       currency: input.currency || "CAD",
       months,
       categories,
-      categoryPlans: rawCategoryPlans
-        .map(normalizeCategoryPlan)
-        .filter((link) => monthIds.has(link.monthId) && categoryIds.has(link.categoryId)),
-      transactions: input.transactions
-        .map(normalizeTransaction)
-        .filter(
-          (transaction) =>
-            months.some((month) => dateFallsInMonth(transaction.occurredAt, month)) &&
-            categoryIds.has(transaction.categoryId)
-        )
+      categoryPlans: uniqueById(categoryPlans),
+      transactions: uniqueById(transactions)
     };
   }
 

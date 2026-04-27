@@ -21,6 +21,7 @@ export const appConfig = {
   refreshTokenTtlDays: Number(process.env.JWT_REFRESH_TTL_DAYS || 14),
   cookieSecure: process.env.COOKIE_SECURE === "true",
   cookieSameSite: (process.env.COOKIE_SAME_SITE || "lax") as "lax" | "strict" | "none",
+  databaseUrl: process.env.DATABASE_URL || "",
   dataDirectoryPath,
   dataFilePath,
   dbFilePath

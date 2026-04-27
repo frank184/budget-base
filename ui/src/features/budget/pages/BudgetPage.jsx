@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApolloClient, useMutation, useQuery } from "@apollo/client";
 
 import {
@@ -32,12 +32,7 @@ import {
   THEME_KEY
 } from "../model/sampleState";
 import { formatCurrency, formatDate, toAmount } from "../../../shared/lib/format";
-
-function syncFavicon(theme) {
-  const favicon = document.getElementById("app-favicon");
-  if (!favicon) return;
-  favicon.setAttribute("href", theme === "dark" ? "/favicon-dark.svg" : "/favicon-light.svg");
-}
+import { syncDocumentTheme } from "../../../shared/lib/theme";
 
 function getStoredBoolean(key, fallback) {
   const raw = localStorage.getItem(key);
@@ -48,6 +43,12 @@ function getStoredBoolean(key, fallback) {
 function getErrorMessage(error) {
   if (!error) return "";
   if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+function getDeveloperErrorText(error) {
+  if (!error) return "";
+  if (error instanceof Error) return error.stack || error.message;
   return String(error);
 }
 
@@ -94,14 +95,19 @@ function buildVisibleBudgetState(shellBudget, monthDetails, monthId, previousSta
 
 function mergeLoadedMonthDetailsIntoFullBudget(fullState, partialState, loadedMonthIds) {
   const loadedIds = new Set(loadedMonthIds);
+  const fullMonthsById = new Map(fullState.months.map((month) => [month.id, month]));
+  const partialMonthsById = new Map(partialState.months.map((month) => [month.id, month]));
+  const addedMonths = partialState.months.filter((month) => !fullMonthsById.has(month.id));
 
-  if (!loadedIds.size) {
+  if (!loadedIds.size && !addedMonths.length) {
     return fullState;
   }
 
-  const fullMonthsById = new Map(fullState.months.map((month) => [month.id, month]));
-  const partialMonthsById = new Map(partialState.months.map((month) => [month.id, month]));
-  const months = fullState.months.map((month) => partialMonthsById.get(month.id) || month);
+  const months = [
+    ...fullState.months.map((month) => partialMonthsById.get(month.id) || month),
+    ...addedMonths
+  ].sort((a, b) => a.id.localeCompare(b.id));
+  addedMonths.forEach((month) => loadedIds.add(month.id));
 
   return normalizeBudgetState({
     ...fullState,
@@ -142,6 +148,25 @@ function PanelSkeleton({ rows = 4, className = "" }) {
           <div className="skeleton-line" key={index} />
         ))}
       </div>
+    </section>
+  );
+}
+
+function StatusToast({ label, message }) {
+  return (
+    <section className="status-toast status-toast-error" role="alert" aria-live="polite">
+      <div className="status-toast-head">
+        <span className="status-toast-icon" aria-hidden="true">
+          !
+        </span>
+        <div>
+          <p className="section-label">{label}</p>
+          <h2>{label}</h2>
+        </div>
+      </div>
+      <pre className="error-code-block status-toast-message">
+        <code>{message}</code>
+      </pre>
     </section>
   );
 }
@@ -318,7 +343,7 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
       return;
     }
 
-    setMonthLoadError(getErrorMessage(monthDetailsError));
+    setMonthLoadError(getDeveloperErrorText(monthDetailsError));
   }, [monthDetailsError, shouldSkipMonthDetailsQuery]);
 
   useEffect(() => {
@@ -334,8 +359,7 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
   useEffect(() => {
     const nextTheme = controlledTheme ?? localTheme;
     localStorage.setItem(THEME_KEY, nextTheme);
-    document.documentElement.dataset.theme = nextTheme;
-    syncFavicon(nextTheme);
+    syncDocumentTheme(nextTheme);
   }, [controlledTheme, localTheme]);
 
   const theme = controlledTheme ?? localTheme;
@@ -419,12 +443,26 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
   }, [transactionView, sortedVisibleTransactions]);
 
   const selectedTransactionId = selectedTransactionIds[transactionView];
-  const selectedTransaction =
-    sortedVisibleTransactions.find((transaction) => transaction.id === selectedTransactionId) || null;
+  const selectedTransaction = useMemo(
+    () => sortedVisibleTransactions.find((transaction) => transaction.id === selectedTransactionId) || null,
+    [selectedTransactionId, sortedVisibleTransactions]
+  );
   const selectedTransactionKind = selectedTransaction?.type || transactionView;
-  const selectedTransactionCategories = month
-    ? getCategories(month, selectedTransactionKind === "all" ? "expense" : selectedTransactionKind)
-    : [];
+  const selectedTransactionCategories = useMemo(
+    () =>
+      month
+        ? getCategories(month, selectedTransactionKind === "all" ? "expense" : selectedTransactionKind)
+        : [],
+    [month, selectedTransactionKind]
+  );
+  const handleTransactionSelect = useCallback(
+    (transactionId) =>
+      setSelectedTransactionIds((current) => ({
+        ...current,
+        [transactionView]: transactionId
+      })),
+    [transactionView]
+  );
 
   function syncBudgetFromServer(
     nextState,
@@ -574,7 +612,7 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
 
       request.resolve?.(nextState);
     } catch (mutationError) {
-      setSaveError(getErrorMessage(mutationError));
+      setSaveError(getDeveloperErrorText(mutationError));
       request.reject?.(mutationError);
     } finally {
       controller.inFlight = false;
@@ -642,12 +680,12 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
         ...options,
         loadedMonthIds: Array.from(loadedMonthIdsRef.current)
       }).catch((saveFailure) => {
-        setSaveError(getErrorMessage(saveFailure));
+        setSaveError(getDeveloperErrorText(saveFailure));
       });
     }, 600);
   }
 
-  function updateBudgetState(recipe, { persist = true, preferredMonthId = "" } = {}) {
+  function updateBudgetState(recipe, { persist = true, preferredMonthId = "", ...saveOptions } = {}) {
     const currentState = budgetStateRef.current;
     if (!currentState) return;
 
@@ -657,7 +695,7 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
     setBudgetState(nextSnapshot);
 
     if (persist) {
-      scheduleSnapshotSave(nextSnapshot, { preferredMonthId });
+      scheduleSnapshotSave(nextSnapshot, { preferredMonthId, ...saveOptions });
     }
   }
 
@@ -705,7 +743,7 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
     try {
       writableState = await ensureWritableBudgetState({ sync: false });
     } catch (loadError) {
-      setSaveError(getErrorMessage(loadError));
+      setSaveError(getDeveloperErrorText(loadError));
       return;
     }
 
@@ -730,7 +768,7 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
       };
     })(writableState);
 
-    updateBudgetState(() => nextState, { preferredMonthId: fallback.id });
+    updateBudgetState(() => nextState, { preferredMonthId: fallback.id, fullReplace: true });
     if (removableNewMonthIdRef.current === selectedMonthId) {
       removableNewMonthIdRef.current = "";
     }
@@ -751,7 +789,7 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
     try {
       writableState = await ensureWritableBudgetState({ sync: false });
     } catch (loadError) {
-      setSaveError(getErrorMessage(loadError));
+      setSaveError(getDeveloperErrorText(loadError));
       return;
     }
 
@@ -762,7 +800,7 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
       .at(-1)?.id;
 
     if (nextMonthId) {
-      updateBudgetState(() => nextState, { preferredMonthId: nextMonthId });
+      updateBudgetState(() => nextState, { preferredMonthId: nextMonthId, fullReplace: true });
       removableNewMonthIdRef.current = nextMonthId;
       setSelectedMonthId(nextMonthId);
       setActiveDetailMonthId(nextMonthId);
@@ -980,14 +1018,7 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
   }
 
   if (!budgetState && shellLoading) {
-    return (
-      <div className="app-shell">
-        <section className="panel">
-          <p className="section-label">Loading</p>
-          <h2>Loading budget data…</h2>
-        </section>
-      </div>
-    );
+    return <div className="app-shell auth-shell auth-shell-blank" aria-hidden="true" />;
   }
 
   if (!budgetState && shellError) {
@@ -996,7 +1027,9 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
         <section className="panel">
           <p className="section-label">Load Error</p>
           <h2>Budget data could not be loaded.</h2>
-          <p>{getErrorMessage(shellError)}</p>
+          <pre className="error-code-block">
+            <code>{getDeveloperErrorText(shellError)}</code>
+          </pre>
         </section>
       </div>
     );
@@ -1028,10 +1061,10 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
       />
 
       {(saveError || monthLoadError) && (
-        <section className="panel status-toast">
-          <p className="section-label">{saveError ? "Save Error" : "Month Load Error"}</p>
-          <p>{saveError || monthLoadError}</p>
-        </section>
+        <StatusToast
+          label={saveError ? "Save Error" : "Month Load Error"}
+          message={saveError || monthLoadError}
+        />
       )}
 
       <MonthBar
@@ -1088,12 +1121,7 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
               selectedTransaction={selectedTransaction}
               selectedTransactionCategories={selectedTransactionCategories}
               onViewChange={handleTransactionViewChange}
-              onSelect={(transactionId) =>
-                setSelectedTransactionIds((current) => ({
-                  ...current,
-                  [transactionView]: transactionId
-                }))
-              }
+              onSelect={handleTransactionSelect}
               onAdd={handleTransactionAdd}
               onUpdate={handleTransactionUpdate}
               onDelete={handleTransactionDelete}

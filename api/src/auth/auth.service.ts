@@ -107,7 +107,7 @@ export class AuthService {
     }
 
     const googleProfile = await this.verifyGoogleIdToken(tokenPayload.id_token, input.expectedNonce);
-    const user = this.upsertGoogleUser(googleProfile);
+    const user = await this.upsertGoogleUser(googleProfile);
     await this.budgetService.ensureBudgetForUser(user.id);
 
     return this.issueSession(user);
@@ -126,7 +126,7 @@ export class AuthService {
         throw new UnauthorizedException("Invalid access token subject.");
       }
 
-      const user = this.authRepository.findUserById(userId);
+      const user = await this.authRepository.findUserById(userId);
       if (!user) {
         throw new UnauthorizedException("User no longer exists.");
       }
@@ -144,7 +144,7 @@ export class AuthService {
       throw new UnauthorizedException("Refresh token is missing.");
     }
 
-    const session = this.authRepository.findSessionByTokenHash(this.hashToken(refreshToken));
+    const session = await this.authRepository.findSessionByTokenHash(this.hashToken(refreshToken));
     if (!session) {
       throw new UnauthorizedException("Refresh token is invalid.");
     }
@@ -157,21 +157,21 @@ export class AuthService {
       throw new UnauthorizedException("Refresh token has expired.");
     }
 
-    const user = this.authRepository.findUserById(session.userId);
+    const user = await this.authRepository.findUserById(session.userId);
     if (!user) {
       throw new UnauthorizedException("Session user no longer exists.");
     }
 
     const nextRefreshToken = this.generateOpaqueToken();
     const nextSessionId = randomUUID();
-    const nextSession = this.authRepository.rotateSession(session.id, {
+    const nextSession = await this.authRepository.rotateSession(session.id, {
       id: nextSessionId,
       userId: user.id,
       tokenHash: this.hashToken(nextRefreshToken),
       expiresAt: this.getRefreshExpiry()
     });
 
-    this.authRepository.touchSession(nextSession.id);
+    await this.authRepository.touchSession(nextSession.id);
 
     return {
       refreshToken: nextRefreshToken,
@@ -186,12 +186,12 @@ export class AuthService {
       throw new UnauthorizedException("Refresh token is missing.");
     }
 
-    const session = this.authRepository.findSessionByTokenHash(this.hashToken(refreshToken));
+    const session = await this.authRepository.findSessionByTokenHash(this.hashToken(refreshToken));
     if (!session || session.revokedAt || new Date(session.expiresAt).getTime() <= Date.now()) {
       throw new UnauthorizedException("Refresh token is invalid.");
     }
 
-    const user = this.authRepository.findUserById(session.userId);
+    const user = await this.authRepository.findUserById(session.userId);
     if (!user) {
       throw new UnauthorizedException("User no longer exists.");
     }
@@ -199,12 +199,12 @@ export class AuthService {
     return this.toAuthenticatedUser(user);
   }
 
-  revokeRefreshToken(refreshToken?: string) {
+  async revokeRefreshToken(refreshToken?: string) {
     if (!refreshToken) {
       return;
     }
 
-    this.authRepository.revokeSessionByTokenHash(this.hashToken(refreshToken));
+    await this.authRepository.revokeSessionByTokenHash(this.hashToken(refreshToken));
   }
 
   getCookieOptions(maxAgeMs: number) {
@@ -238,8 +238,8 @@ export class AuthService {
     return payload;
   }
 
-  private upsertGoogleUser(profile: GoogleProfile) {
-    const existingIdentity = this.authRepository.findIdentity("google", profile.sub);
+  private async upsertGoogleUser(profile: GoogleProfile) {
+    const existingIdentity = await this.authRepository.findIdentity("google", profile.sub);
     const profileData = {
       email: profile.email,
       displayName: profile.name || profile.email,
@@ -247,20 +247,20 @@ export class AuthService {
     };
 
     if (existingIdentity) {
-      const user = this.authRepository.updateUser(existingIdentity.userId, profileData);
-      this.authRepository.updateIdentity(existingIdentity.id, {
+      const user = await this.authRepository.updateUser(existingIdentity.userId, profileData);
+      await this.authRepository.updateIdentity(existingIdentity.id, {
         email: profile.email,
         rawProfileJson: JSON.stringify(profile)
       });
       return user;
     }
 
-    const existingUser = this.authRepository.findUserByEmail(profile.email);
+    const existingUser = await this.authRepository.findUserByEmail(profile.email);
     const user = existingUser
-      ? this.authRepository.updateUser(existingUser.id, profileData)
-      : this.authRepository.createUser(profileData);
+      ? await this.authRepository.updateUser(existingUser.id, profileData)
+      : await this.authRepository.createUser(profileData);
 
-    this.authRepository.createIdentity({
+    await this.authRepository.createIdentity({
       userId: user.id,
       provider: "google",
       providerUserId: profile.sub,
@@ -273,7 +273,7 @@ export class AuthService {
 
   private async issueSession(user: { id: number; email: string; displayName: string; avatarUrl?: string }) {
     const refreshToken = this.generateOpaqueToken();
-    const session = this.authRepository.createSession({
+    const session = await this.authRepository.createSession({
       id: randomUUID(),
       userId: user.id,
       tokenHash: this.hashToken(refreshToken),

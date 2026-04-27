@@ -120,7 +120,29 @@ export const apolloClient = new ApolloClient({
   cache: new InMemoryCache({
     typePolicies: {
       BudgetType: {
-        keyFields: ["id"]
+        keyFields: ["id"],
+        fields: {
+          categoryPlans: {
+            merge(_existing, incoming) {
+              return incoming;
+            }
+          },
+          transactions: {
+            merge(_existing, incoming) {
+              return incoming;
+            }
+          },
+          months: {
+            merge(_existing, incoming) {
+              return incoming;
+            }
+          },
+          categories: {
+            merge(_existing, incoming) {
+              return incoming;
+            }
+          }
+        }
       },
       Query: {
         fields: {

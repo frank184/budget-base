@@ -1,0 +1,142 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             Int            @id @default(autoincrement())
+  email          String
+  displayName    String         @map("display_name")
+  avatarUrl      String?        @map("avatar_url")
+  status         String         @default("active")
+  lastLoginAt    DateTime?      @map("last_login_at")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @default(now()) @updatedAt @map("updated_at")
+  identities     AuthIdentity[]
+  sessions       UserSession[]
+  budgets        Budget[]
+
+  @@unique([email], map: "idx_users_email")
+  @@map("users")
+}
+
+model AuthIdentity {
+  id             Int      @id @default(autoincrement())
+  userId         Int      @map("user_id")
+  provider       String
+  providerUserId String   @map("provider_user_id")
+  email          String?
+  rawProfileJson String?  @map("raw_profile_json")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId], map: "idx_auth_identities_provider_user")
+  @@map("auth_identities")
+}
+
+model UserSession {
+  id                  String    @id
+  userId              Int       @map("user_id")
+  tokenHash           String    @map("token_hash")
+  expiresAt           DateTime  @map("expires_at")
+  revokedAt           DateTime? @map("revoked_at")
+  replacedBySessionId String?   @map("replaced_by_session_id")
+  lastUsedAt          DateTime? @map("last_used_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tokenHash], map: "idx_user_sessions_token_hash")
+  @@index([userId], map: "idx_user_sessions_user_id")
+  @@map("user_sessions")
+}
+
+model Budget {
+  id          Int                 @id @default(autoincrement())
+  ownerUserId Int?                @map("owner_user_id")
+  name        String
+  currency    String
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @default(now()) @updatedAt @map("updated_at")
+  owner       User?               @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  months      BudgetMonth[]
+  categories  BudgetCategory[]
+  plans       BudgetCategoryPlan[]
+  transactions BudgetTransaction[]
+
+  @@unique([ownerUserId], map: "idx_budgets_owner_user_id")
+  @@map("budgets")
+}
+
+model BudgetMonth {
+  pk              Int                  @id @default(autoincrement())
+  budgetId        Int                  @map("budget_id")
+  monthId         String               @map("month_id")
+  name            String
+  startAt         DateTime             @map("start_at")
+  endAt           DateTime             @map("end_at")
+  startingBalance Decimal              @map("starting_balance") @db.Decimal(12, 2)
+  budget          Budget               @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  plans           BudgetCategoryPlan[]
+
+  @@unique([budgetId, monthId])
+  @@unique([budgetId, startAt])
+  @@index([budgetId, startAt], map: "idx_months_budget_start")
+  @@map("months")
+}
+
+model BudgetCategory {
+  pk           Int                  @id @default(autoincrement())
+  budgetId     Int                  @map("budget_id")
+  categoryId   String               @map("category_id")
+  name         String
+  type         String
+  budget       Budget               @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  plans        BudgetCategoryPlan[]
+  transactions BudgetTransaction[]
+
+  @@unique([budgetId, categoryId])
+  @@map("categories")
+}
+
+model BudgetCategoryPlan {
+  pk         Int            @id @default(autoincrement())
+  budgetId   Int            @map("budget_id")
+  linkId     String         @map("link_id")
+  monthId    String         @map("month_id")
+  categoryId String         @map("category_id")
+  planned    Decimal        @db.Decimal(12, 2)
+  sortOrder  Int            @default(0) @map("sort_order")
+  budget     Budget         @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  month      BudgetMonth    @relation(fields: [budgetId, monthId], references: [budgetId, monthId], onDelete: Cascade)
+  category   BudgetCategory @relation(fields: [budgetId, categoryId], references: [budgetId, categoryId], onDelete: Cascade)
+
+  @@unique([budgetId, linkId])
+  @@unique([budgetId, monthId, categoryId])
+  @@index([budgetId, monthId, sortOrder, linkId], map: "idx_category_links_month_sort")
+  @@map("category_links")
+}
+
+model BudgetTransaction {
+  pk            Int            @id @default(autoincrement())
+  budgetId      Int            @map("budget_id")
+  transactionId String         @map("transaction_id")
+  occurredAt    DateTime       @map("occurred_at")
+  amount        Decimal        @db.Decimal(12, 2)
+  description   String         @default("")
+  categoryId    String         @map("category_id")
+  type          String
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @default(now()) @updatedAt @map("updated_at")
+  budget        Budget         @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  category      BudgetCategory @relation(fields: [budgetId, categoryId], references: [budgetId, categoryId], onDelete: Cascade)
+
+  @@unique([budgetId, transactionId])
+  @@index([budgetId, occurredAt(sort: Desc), transactionId(sort: Desc)], map: "idx_transactions_budget_date")
+  @@index([budgetId, categoryId], map: "idx_transactions_category")
+  @@map("transactions")
+}

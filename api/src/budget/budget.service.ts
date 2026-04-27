@@ -18,12 +18,12 @@ function dateFallsInRange(dateTime: string, startAt: string, endAt: string) {
 export class BudgetService {
   constructor(private readonly repository: BudgetRepository) {}
 
-  listBudgets(userId: number): BudgetRecord[] {
+  listBudgets(userId: number): Promise<BudgetRecord[]> {
     return this.repository.listBudgetRecords(userId);
   }
 
-  getBudgetForUser(userId: number, budgetId?: number): BudgetState {
-    const resolvedBudgetId = budgetId ?? this.repository.getBudgetRecordForUser(userId)?.id;
+  async getBudgetForUser(userId: number, budgetId?: number): Promise<BudgetState> {
+    const resolvedBudgetId = budgetId ?? (await this.repository.getBudgetRecordForUser(userId))?.id;
 
     if (!resolvedBudgetId) {
       throw new NotFoundException("Budget not found");
@@ -32,16 +32,16 @@ export class BudgetService {
     return this.repository.getBudget(resolvedBudgetId, userId);
   }
 
-  replaceBudgetForUser(userId: number, budget: BudgetState, budgetId?: number) {
+  async replaceBudgetForUser(userId: number, budget: BudgetState, budgetId?: number) {
     try {
       const normalized = normalizeBudgetState(budget);
-      const resolvedBudgetId = budgetId ?? normalized.id ?? this.repository.getBudgetRecordForUser(userId)?.id;
+      const resolvedBudgetId = budgetId ?? normalized.id ?? (await this.repository.getBudgetRecordForUser(userId))?.id;
 
       if (!resolvedBudgetId) {
         throw new NotFoundException("Budget not found");
       }
 
-      return this.repository.saveBudget(normalized, userId, resolvedBudgetId);
+      return await this.repository.saveBudget(normalized, userId, resolvedBudgetId);
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -52,9 +52,9 @@ export class BudgetService {
     }
   }
 
-  createBudgetForUser(userId: number, budget?: Partial<BudgetState>) {
+  async createBudgetForUser(userId: number, budget?: Partial<BudgetState>) {
     try {
-      return this.repository.createBudget(userId, budget);
+      return await this.repository.createBudget(userId, budget);
     } catch (error) {
       if (error instanceof Error && /already exists/i.test(error.message)) {
         throw new ConflictException(error.message);
@@ -69,14 +69,14 @@ export class BudgetService {
     return this.repository.ensureBudgetForUser(userId);
   }
 
-  getMonthForUser(userId: number, monthId: string): BudgetMonthView {
-    const resolvedBudgetId = this.repository.getBudgetRecordForUser(userId)?.id;
+  async getMonthForUser(userId: number, monthId: string): Promise<BudgetMonthView> {
+    const resolvedBudgetId = (await this.repository.getBudgetRecordForUser(userId))?.id;
 
     if (!resolvedBudgetId) {
       throw new NotFoundException("Budget not found");
     }
 
-    const month = this.repository.getMonth(resolvedBudgetId, userId, monthId);
+    const month = await this.repository.getMonth(resolvedBudgetId, userId, monthId);
 
     if (!month) {
       throw new NotFoundException("Month not found");
@@ -85,27 +85,27 @@ export class BudgetService {
     return month;
   }
 
-  listTransactions(filter?: {
+  async listTransactions(filter?: {
     monthId?: string;
     categoryId?: string;
     type?: string;
     occurredFrom?: string;
     occurredTo?: string;
-  }, userId?: number): BudgetTransactionRecord[] {
+  }, userId?: number): Promise<BudgetTransactionRecord[]> {
     if (!userId) {
       throw new NotFoundException("Budget not found");
     }
 
-    const budgetId = this.repository.getBudgetRecordForUser(userId)?.id;
+    const budgetId = (await this.repository.getBudgetRecordForUser(userId))?.id;
 
     if (!budgetId) {
       throw new NotFoundException("Budget not found");
     }
 
-    let transactions = this.repository.listTransactions(budgetId);
+    let transactions = await this.repository.listTransactions(budgetId);
 
     if (filter?.monthId) {
-      const months = this.repository.listMonths(budgetId);
+      const months = await this.repository.listMonths(budgetId);
       const month = months.find((entry) => entry.id === filter.monthId);
 
       if (!month) {
@@ -136,14 +136,14 @@ export class BudgetService {
     return transactions;
   }
 
-  getTransaction(userId: number, id: string): BudgetTransactionRecord {
-    const budgetIdToUse = this.repository.getBudgetRecordForUser(userId)?.id;
+  async getTransaction(userId: number, id: string): Promise<BudgetTransactionRecord> {
+    const budgetIdToUse = (await this.repository.getBudgetRecordForUser(userId))?.id;
 
     if (!budgetIdToUse) {
       throw new NotFoundException("Budget not found");
     }
 
-    const transaction = this.repository.listTransactions(budgetIdToUse).find((entry) => entry.id === id);
+    const transaction = (await this.repository.listTransactions(budgetIdToUse)).find((entry) => entry.id === id);
 
     if (!transaction) {
       throw new NotFoundException("Transaction not found");
@@ -152,25 +152,24 @@ export class BudgetService {
     return transaction;
   }
 
-  getTransactionCategory(userId: number, categoryId: string): BudgetCategoryRecord | undefined {
-    const budgetId = this.repository.getBudgetRecordForUser(userId)?.id;
+  async getTransactionCategory(userId: number, categoryId: string): Promise<BudgetCategoryRecord | undefined> {
+    const budgetId = (await this.repository.getBudgetRecordForUser(userId))?.id;
 
     if (!budgetId) {
       throw new NotFoundException("Budget not found");
     }
 
-    return this.repository.listCategories(budgetId).find((entry) => entry.id === categoryId);
+    return (await this.repository.listCategories(budgetId)).find((entry) => entry.id === categoryId);
   }
 
-  getTransactionMonth(userId: number, transaction: BudgetTransactionRecord): BudgetMonthView | undefined {
-    const budgetId = this.repository.getBudgetRecordForUser(userId)?.id;
+  async getTransactionMonth(userId: number, transaction: BudgetTransactionRecord): Promise<BudgetMonthView | undefined> {
+    const budgetId = (await this.repository.getBudgetRecordForUser(userId))?.id;
 
     if (!budgetId) {
       throw new NotFoundException("Budget not found");
     }
 
-    const month = this.repository
-      .listMonths(budgetId)
+    const month = (await this.repository.listMonths(budgetId))
       .find((entry) =>
         dateFallsInRange(transaction.occurredAt, entry.startAt, entry.endAt)
       );
@@ -178,18 +177,18 @@ export class BudgetService {
     return month ? this.getMonthForUser(userId, month.id) : undefined;
   }
 
-  listCategoryPlans(filter?: { monthId?: string; monthIds?: string[] }, userId?: number) {
+  async listCategoryPlans(filter?: { monthId?: string; monthIds?: string[] }, userId?: number) {
     if (!userId) {
       throw new NotFoundException("Budget not found");
     }
 
-    const resolvedBudgetId = this.repository.getBudgetRecordForUser(userId)?.id;
+    const resolvedBudgetId = (await this.repository.getBudgetRecordForUser(userId))?.id;
 
     if (!resolvedBudgetId) {
       throw new NotFoundException("Budget not found");
     }
 
-    let categoryPlans = this.repository.listCategoryPlans(resolvedBudgetId);
+    let categoryPlans = await this.repository.listCategoryPlans(resolvedBudgetId);
 
     if (filter?.monthId) {
       categoryPlans = categoryPlans.filter((link) => link.monthId === filter.monthId);

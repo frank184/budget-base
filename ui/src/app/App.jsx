@@ -9,6 +9,7 @@ import {
   subscribeToSession
 } from "../auth/session";
 import { THEME_KEY } from "../features/budget/model/sampleState";
+import { syncDocumentTheme } from "../shared/lib/theme";
 
 function ThemeToggleButton({ theme, onClick }) {
   return (
@@ -31,6 +32,10 @@ function ThemeToggleButton({ theme, onClick }) {
       )}
     </button>
   );
+}
+
+function AuthBackdrop() {
+  return <div className="app-shell auth-shell auth-shell-blank" aria-hidden="true" />;
 }
 
 function FullPageMessage({ label, title, body, action, theme, onThemeToggle }) {
@@ -108,7 +113,7 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem(THEME_KEY, theme);
-    document.documentElement.dataset.theme = theme;
+    syncDocumentTheme(theme);
   }, [theme]);
 
   useEffect(() => {
@@ -149,27 +154,11 @@ export default function App() {
   }, []);
 
   if (status === "loading") {
-    return (
-      <FullPageMessage
-        label="Loading"
-        title="Checking your session"
-        body="Budget Base is verifying whether you already have an active login."
-        theme={theme}
-        onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-      />
-    );
+    return <AuthBackdrop />;
   }
 
   if (status === "callback") {
-    return (
-      <FullPageMessage
-        label="Signing In"
-        title="Completing Google sign-in"
-        body="The API is exchanging your Google login for an app session."
-        theme={theme}
-        onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-      />
-    );
+    return <AuthBackdrop />;
   }
 
   if (!user) {

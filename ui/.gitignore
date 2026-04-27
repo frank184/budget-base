@@ -1,0 +1,8 @@
+.vscode
+.vercel
+dist
+node_modules
+privateState.json
+data
+.env*
+!.env.example

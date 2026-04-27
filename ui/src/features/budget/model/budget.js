@@ -134,11 +134,21 @@ function normalizeTransactionRecord(transaction, months, fallbackMonthId) {
   };
 }
 
+function uniqueById(records) {
+  return Array.from(new Map(records.map((record) => [record.id, record])).values());
+}
+
 export function normalizeBudgetState(state) {
   const months = (state?.months || []).map(normalizeMonthRecord);
   const monthIds = new Set(months.map((month) => month.id));
   const categories = (state?.categories || []).map(normalizeCategoryDefinition);
   const categoryIds = new Set(categories.map((category) => category.id));
+  const categoryPlans = (state?.categoryPlans || [])
+    .map(normalizeCategoryPlan)
+    .filter((link) => monthIds.has(link.monthId) && categoryIds.has(link.categoryId));
+  const transactions = (state?.transactions || [])
+    .map((transaction) => normalizeTransactionRecord(transaction, months))
+    .filter((transaction) => monthIds.has(transaction.monthId) && categoryIds.has(transaction.categoryId));
 
   return {
     id: state?.id,
@@ -146,12 +156,8 @@ export function normalizeBudgetState(state) {
     currency: state?.currency || "CAD",
     months,
     categories,
-    categoryPlans: (state?.categoryPlans || [])
-      .map(normalizeCategoryPlan)
-      .filter((link) => monthIds.has(link.monthId) && categoryIds.has(link.categoryId)),
-    transactions: (state?.transactions || [])
-      .map((transaction) => normalizeTransactionRecord(transaction, months))
-      .filter((transaction) => monthIds.has(transaction.monthId) && categoryIds.has(transaction.categoryId))
+    categoryPlans: uniqueById(categoryPlans),
+    transactions: uniqueById(transactions)
   };
 }
 

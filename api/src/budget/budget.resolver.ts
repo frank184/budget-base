@@ -94,13 +94,13 @@ export class BudgetResolver {
   }
 
   @ResolveField("months", () => [BudgetMonthType])
-  resolveMonths(
+  async resolveMonths(
     @Parent() budget: BudgetRecord | BudgetState,
     @CurrentUser() user: AuthenticatedUser
-  ): BudgetMonthView[] {
+  ): Promise<BudgetMonthView[]> {
     const budgetState = "months" in budget && Array.isArray(budget.months)
       ? budget
-      : this.budgetService.getBudgetForUser(user.id, budget.id);
+      : await this.budgetService.getBudgetForUser(user.id, budget.id);
 
     return budgetState.months
       .map((month) => hydrateBudgetMonth(budgetState, month.id))
@@ -108,27 +108,27 @@ export class BudgetResolver {
   }
 
   @ResolveField("categories", () => [BudgetCategoryType])
-  resolveCategories(
+  async resolveCategories(
     @Parent() budget: BudgetRecord | BudgetState,
     @CurrentUser() user: AuthenticatedUser
-  ): BudgetCategoryRecord[] {
+  ): Promise<BudgetCategoryRecord[]> {
     if ("categories" in budget && Array.isArray(budget.categories)) {
       return budget.categories;
     }
 
-    return this.budgetService.getBudgetForUser(user.id, budget.id).categories;
+    return (await this.budgetService.getBudgetForUser(user.id, budget.id)).categories;
   }
 
   @ResolveField("categoryPlans", () => [BudgetCategoryPlanType])
-  resolveCategoryPlans(
+  async resolveCategoryPlans(
     @Parent() budget: BudgetRecord | BudgetState,
     @CurrentUser() user: AuthenticatedUser,
     @Args("monthId", { type: () => ID, nullable: true }) monthId?: string,
     @Args("monthIds", { type: () => [ID], nullable: true }) monthIds?: string[]
-  ): BudgetCategoryPlanRecord[] {
+  ): Promise<BudgetCategoryPlanRecord[]> {
     const budgetState = "categoryPlans" in budget && Array.isArray(budget.categoryPlans)
       ? budget
-      : this.budgetService.getBudgetForUser(user.id, budget.id);
+      : await this.budgetService.getBudgetForUser(user.id, budget.id);
 
     return budgetState.categoryPlans.filter((link) =>
       monthId ? link.monthId === monthId : monthIds?.length ? monthIds.includes(link.monthId) : true
@@ -136,14 +136,14 @@ export class BudgetResolver {
   }
 
   @ResolveField("transactions", () => [BudgetTransactionType])
-  resolveTransactions(
+  async resolveTransactions(
     @Parent() budget: BudgetRecord | BudgetState,
     @CurrentUser() user: AuthenticatedUser,
     @Args("filter", { type: () => TransactionFilterInput, nullable: true }) filter?: TransactionFilterInput
-  ): BudgetTransactionRecord[] {
+  ): Promise<BudgetTransactionRecord[]> {
     const budgetState = "transactions" in budget && Array.isArray(budget.transactions)
       ? budget
-      : this.budgetService.getBudgetForUser(user.id, budget.id);
+      : await this.budgetService.getBudgetForUser(user.id, budget.id);
 
     return budgetState.transactions.filter((transaction) => {
       if (filter?.categoryId && transaction.categoryId !== filter.categoryId) return false;
@@ -158,7 +158,7 @@ export class BudgetResolver {
   resolveTransactionCategory(
     @Parent() transaction: BudgetTransactionRecord,
     @CurrentUser() user: AuthenticatedUser
-  ): BudgetCategoryRecord | undefined {
+  ): Promise<BudgetCategoryRecord | undefined> {
     return this.budgetService.getTransactionCategory(user.id, transaction.categoryId);
   }
 
@@ -166,7 +166,7 @@ export class BudgetResolver {
   resolveTransactionMonth(
     @Parent() transaction: BudgetTransactionRecord,
     @CurrentUser() user: AuthenticatedUser
-  ): BudgetMonthView | undefined {
+  ): Promise<BudgetMonthView | undefined> {
     return this.budgetService.getTransactionMonth(user.id, transaction);
   }
 }
