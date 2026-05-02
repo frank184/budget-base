@@ -55,7 +55,8 @@ export class AuthController {
   async createSession(@Req() request: FastifyRequest, @Res() reply: FastifyReply) {
     try {
       const session = await this.authService.createSessionFromRefreshToken(
-        request.cookies[this.authService.refreshCookieName]
+        request.cookies[this.authService.refreshCookieName],
+        { rotateRefreshToken: false }
       );
 
       reply.setCookie(
@@ -69,20 +70,39 @@ export class AuthController {
         user: session.user
       });
     } catch (error) {
-      reply.clearCookie(this.authService.refreshCookieName, { path: "/" });
+      reply.clearCookie(this.authService.refreshCookieName, this.authService.getClearCookieOptions());
       throw error;
     }
   }
 
   @Post("refresh")
   async refreshSession(@Req() request: FastifyRequest, @Res() reply: FastifyReply) {
-    return this.createSession(request, reply);
+    try {
+      const session = await this.authService.createSessionFromRefreshToken(
+        request.cookies[this.authService.refreshCookieName],
+        { rotateRefreshToken: true }
+      );
+
+      reply.setCookie(
+        this.authService.refreshCookieName,
+        session.refreshToken,
+        this.authService.getCookieOptions(appConfig.refreshTokenTtlDays * 24 * 60 * 60 * 1000)
+      );
+
+      return reply.send({
+        accessToken: session.accessToken,
+        user: session.user
+      });
+    } catch (error) {
+      reply.clearCookie(this.authService.refreshCookieName, this.authService.getClearCookieOptions());
+      throw error;
+    }
   }
 
   @Post("logout")
   async logout(@Req() request: FastifyRequest, @Res() reply: FastifyReply) {
     await this.authService.revokeRefreshToken(request.cookies[this.authService.refreshCookieName]);
-    reply.clearCookie(this.authService.refreshCookieName, { path: "/" });
+    reply.clearCookie(this.authService.refreshCookieName, this.authService.getClearCookieOptions());
     return reply.status(204).send();
   }
 

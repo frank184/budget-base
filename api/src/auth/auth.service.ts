@@ -139,7 +139,10 @@ export class AuthService {
     }
   }
 
-  async createSessionFromRefreshToken(refreshToken?: string) {
+  async createSessionFromRefreshToken(
+    refreshToken?: string,
+    options: { rotateRefreshToken?: boolean } = {}
+  ) {
     if (!refreshToken) {
       throw new UnauthorizedException("Refresh token is missing.");
     }
@@ -160,6 +163,17 @@ export class AuthService {
     const user = await this.authRepository.findUserById(session.userId);
     if (!user) {
       throw new UnauthorizedException("Session user no longer exists.");
+    }
+
+    if (!options.rotateRefreshToken) {
+      await this.authRepository.touchSession(session.id);
+
+      return {
+        refreshToken,
+        accessToken: await this.createAccessToken(user.id),
+        user: this.toAuthenticatedUser(user),
+        refreshExpiresAt: session.expiresAt
+      };
     }
 
     const nextRefreshToken = this.generateOpaqueToken();
@@ -214,6 +228,14 @@ export class AuthService {
       secure: appConfig.cookieSecure,
       path: "/",
       maxAge: Math.floor(maxAgeMs / 1000)
+    } as const;
+  }
+
+  getClearCookieOptions() {
+    return {
+      path: "/",
+      sameSite: appConfig.cookieSameSite,
+      secure: appConfig.cookieSecure
     } as const;
   }
 
