@@ -7,11 +7,13 @@
     "dev:compile": "tsc -w -p tsconfig.json --preserveWatchOutput",
     "dev:serve": "node --watch dist/main.js",
     "build": "npm run prisma:generate && tsc -p tsconfig.json --incremental false",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json --incremental false",
     "start": "node dist/main.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
+    "repl": "tsx scripts/repl.ts",
     "db:import:sqlite": "tsx scripts/import-sqlite.ts",
     "db:import:sqlite:dry-run": "tsx scripts/import-sqlite.ts --dry-run"
   },

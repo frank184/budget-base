@@ -262,7 +262,10 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
   });
   const debouncedSaveRef = useRef(null);
   const loadedMonthIdsRef = useRef(new Set());
-  const shouldSkipMonthDetailsQuery = !selectedMonthId || hasLocalBudgetEditRef.current;
+  const isSelectedMonthAlreadyLoaded =
+    hasFullBudgetDetailsRef.current || loadedMonthIdsRef.current.has(selectedMonthId);
+  const shouldSkipMonthDetailsQuery =
+    !selectedMonthId || hasLocalBudgetEditRef.current || isSelectedMonthAlreadyLoaded;
 
   const { data: shellData, loading: shellLoading, error: shellError } = useQuery(BUDGET_QUERY, {
     fetchPolicy: "cache-first"
@@ -276,7 +279,7 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
       monthId: selectedMonthId
     },
     skip: shouldSkipMonthDetailsQuery,
-    fetchPolicy: "no-cache"
+    fetchPolicy: "cache-first"
   });
   const [commitBudget] = useMutation(UPDATE_BUDGET_MUTATION);
 
@@ -690,6 +693,10 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
     if (!currentState) return;
 
     const nextSnapshot = recipe(currentState);
+    if (serializeBudgetState(nextSnapshot) === serializeBudgetState(currentState)) {
+      return;
+    }
+
     hasLocalBudgetEditRef.current = persist;
     budgetStateRef.current = nextSnapshot;
     setBudgetState(nextSnapshot);
@@ -715,7 +722,18 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
   }
 
   function handleMonthSelect(monthId) {
+    if (monthId === selectedMonthId) {
+      if (hasFullBudgetDetailsRef.current || loadedMonthIdsRef.current.has(monthId)) {
+        setActiveDetailMonthId(monthId);
+      }
+      setMonthLoadError("");
+      return;
+    }
+
     setSelectedMonthId(monthId);
+    if (hasFullBudgetDetailsRef.current || loadedMonthIdsRef.current.has(monthId)) {
+      setActiveDetailMonthId(monthId);
+    }
     setMonthLoadError("");
     resetTransactionSelection();
   }

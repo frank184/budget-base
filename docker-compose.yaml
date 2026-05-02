@@ -40,23 +40,19 @@ services:
     build:
       context: ./api
     command: npm run dev
-    env_file: api/.env
+    env_file: ./api/.env
     environment:
       HOST: 0.0.0.0
       PORT: 3001
       LOG_LEVEL: debug
       GRAPHQL_DEBUG: "true"
       CHOKIDAR_USEPOLLING: "true"
-      UI_BASE_URL: "${UI_BASE_URL:-http://127.0.0.1:5173}"
-      API_BASE_URL: "${API_BASE_URL:-http://127.0.0.1:3001}"
-      GOOGLE_CALLBACK_URL: "${GOOGLE_CALLBACK_URL:-http://127.0.0.1:3001/auth/google/callback}"
-      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
-      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
-      JWT_ACCESS_SECRET: "${JWT_ACCESS_SECRET:-dev-access-secret}"
-      JWT_REFRESH_SECRET: "${JWT_REFRESH_SECRET:-dev-refresh-secret}"
+      UI_BASE_URL: http://127.0.0.1:5173
+      API_BASE_URL: http://127.0.0.1:3001
+      GOOGLE_CALLBACK_URL: http://127.0.0.1:3001/auth/google/callback
       COOKIE_SECURE: "false"
       COOKIE_SAME_SITE: "lax"
-      DATABASE_URL: "${DATABASE_URL:-postgresql://budget_base:budget_base@postgres:5432/budget_base?schema=public}"
+      DATABASE_URL: postgresql://budget_base:budget_base@postgres:5432/budget_base?schema=public
     ports:
       - "3001:3001"
     depends_on:

@@ -28,7 +28,13 @@ export function SummaryGrid({ totals, formatCurrency }) {
       return "neutral";
     }
 
-    return toneClass(row.actual)
+    if (row.label === "Net") {
+      if (row.actual < row.planned) return "negative";
+      if (row.actual > row.planned) return "positive";
+      return "neutral";
+    }
+
+    return toneClass(row.actual);
   }
 
   const rows = [
