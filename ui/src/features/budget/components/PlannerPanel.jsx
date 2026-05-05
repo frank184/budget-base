@@ -19,9 +19,12 @@ export function PlannerPanel({
     return value > 0 ? "positive" : "negative";
   }
 
-  function toneClassActual(actual, planned) {
-    if (actual - planned === 0) return "neutral";
-    return actual < planned ? "positive" : "negative";
+  function getCategoryDiff(type, planned, actual) {
+    return type === "expense" ? planned - actual : actual - planned;
+  }
+
+  function toneClassActual(type, actual, planned) {
+    return toneClass(getCategoryDiff(type, planned, actual));
   }
 
   const [plannedDrafts, setPlannedDrafts] = useState({});
@@ -148,8 +151,7 @@ export function PlannerPanel({
                 {group.items.length ? (
                   group.items.map((category) => {
                     const actual = actualByCategory[category.id] || 0;
-                    const diff =
-                      group.type === "expense" ? category.planned - actual : actual - category.planned;
+                    const diff = getCategoryDiff(group.type, category.planned, actual);
                     return (
                       <tr
                         key={category.id}
@@ -221,7 +223,7 @@ export function PlannerPanel({
                             />
                           </span>
                         </td>
-                        <td className={`numeric ${toneClassActual(actual, category.planned)}`}>{formatCurrency(actual)}</td>
+                        <td className={`numeric ${toneClassActual(group.type, actual, category.planned)}`}>{formatCurrency(actual)}</td>
                         <td className={`numeric ${toneClass(diff)}`}>{formatCurrency(diff)}</td>
                         <td className="row-actions">
                           <button className="icon-button" onClick={() => onDelete(category.id)} disabled={view === "all"}>
