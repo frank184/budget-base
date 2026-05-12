@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useMemo, useState } from "react";
+import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import { toAmount } from "../../../shared/lib/format";
 
 const TransactionList = memo(function TransactionList({
@@ -6,6 +6,7 @@ const TransactionList = memo(function TransactionList({
   categoryLookup,
   transactions,
   selectedTransactionId,
+  highlightedTransactionId,
   onSelect,
   formatDate,
   formatCurrency
@@ -17,6 +18,20 @@ const TransactionList = memo(function TransactionList({
         ? "No expenses in this month."
         : "No income in this month.";
 
+  const transactionRowRefs = useRef(new Map());
+
+  useEffect(() => {
+    if (!highlightedTransactionId) return;
+
+    const target = transactionRowRefs.current.get(highlightedTransactionId);
+    if (!target) return;
+
+    target.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest"
+    });
+  }, [highlightedTransactionId, transactions]);
+
   return (
     <div className={`transaction-list transaction-ledger ${transactions.length ? "" : "transaction-ledger-empty"}`.trim()}>
       {transactions.length ? transactions.map((transaction) => {
@@ -25,7 +40,18 @@ const TransactionList = memo(function TransactionList({
 
         return (
           <button
-            className={`transaction-row ${transaction.id === selectedTransactionId ? "active" : ""}`}
+            ref={(node) => {
+              if (node) {
+                transactionRowRefs.current.set(transaction.id, node);
+              } else {
+                transactionRowRefs.current.delete(transaction.id);
+              }
+            }}
+            className={[
+              "transaction-row",
+              transaction.id === selectedTransactionId ? "active" : "",
+              transaction.id === highlightedTransactionId ? "transaction-row-attention" : ""
+            ].filter(Boolean).join(" ")}
             key={transaction.id}
             onClick={() => onSelect(transaction.id)}
           >
@@ -58,7 +84,8 @@ const TransactionEditor = memo(function TransactionEditor({
   editorCategoryId,
   categoryOptions,
   onUpdate,
-  onDelete
+  onDelete,
+  highlighted = false
 }) {
   const [amountInput, setAmountInput] = useState(
     selectedTransaction ? toAmount(selectedTransaction.amount).toFixed(2) : "0.00"
@@ -87,7 +114,7 @@ const TransactionEditor = memo(function TransactionEditor({
   }
 
   return (
-    <section className="panel">
+    <section className={`panel ${highlighted ? "editor-panel-attention" : ""}`}>
       <div>
         <p className="section-label">Editor</p>
         <h2>{editorKind === "income" ? "Income" : "Expense"} Entry</h2>
@@ -167,9 +194,13 @@ export const TransactionPanel = memo(function TransactionPanel({
   onAdd,
   onUpdate,
   onDelete,
+  attentionTransactionId = "",
   formatDate,
   formatCurrency
 }) {
+  const editorWrapRef = useRef(null);
+  const handledAttentionTransactionIdRef = useRef("");
+  const [highlightedTransactionId, setHighlightedTransactionId] = useState("");
   const editorKind = selectedTransaction?.type || view;
   const categoryOptions = useMemo(
     () =>
@@ -186,6 +217,30 @@ export const TransactionPanel = memo(function TransactionPanel({
     [categoryLookup, selectedTransaction, selectedTransactionCategories]
   );
   const editorCategoryId = selectedTransaction?.categoryId || categoryOptions[0]?.id || "";
+
+  useEffect(() => {
+    if (!attentionTransactionId || selectedTransaction?.id !== attentionTransactionId) {
+      return;
+    }
+    if (handledAttentionTransactionIdRef.current === attentionTransactionId) {
+      return;
+    }
+
+    handledAttentionTransactionIdRef.current = attentionTransactionId;
+    editorWrapRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest"
+    });
+    setHighlightedTransactionId(attentionTransactionId);
+
+    const timeoutId = window.setTimeout(() => {
+      setHighlightedTransactionId((current) =>
+        current === attentionTransactionId ? "" : current
+      );
+    }, 1600);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [attentionTransactionId, selectedTransaction?.id]);
 
   return (
     <>
@@ -229,20 +284,24 @@ export const TransactionPanel = memo(function TransactionPanel({
           categoryLookup={categoryLookup}
           transactions={transactions}
           selectedTransactionId={selectedTransaction?.id || ""}
+          highlightedTransactionId={highlightedTransactionId}
           onSelect={onSelect}
           formatDate={formatDate}
           formatCurrency={formatCurrency}
         />
       </section>
 
-      <TransactionEditor
-        selectedTransaction={selectedTransaction}
-        editorKind={editorKind}
-        editorCategoryId={editorCategoryId}
-        categoryOptions={categoryOptions}
-        onUpdate={onUpdate}
-        onDelete={onDelete}
-      />
+      <div ref={editorWrapRef}>
+        <TransactionEditor
+          selectedTransaction={selectedTransaction}
+          editorKind={editorKind}
+          editorCategoryId={editorCategoryId}
+          categoryOptions={categoryOptions}
+          onUpdate={onUpdate}
+          onDelete={onDelete}
+          highlighted={highlightedTransactionId === selectedTransaction?.id}
+        />
+      </div>
     </>
   );
 });

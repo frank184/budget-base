@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { getCategories } from "../model/budget";
 import { toAmount } from "../../../shared/lib/format";
 
@@ -12,7 +12,8 @@ export function PlannerPanel({
   onAdd,
   onUpdate,
   onDelete,
-  onReorder
+  onReorder,
+  attentionCategoryId = ""
 }) {
   function toneClass(value) {
     if (value === 0) return "neutral";
@@ -31,6 +32,9 @@ export function PlannerPanel({
   const [nameDrafts, setNameDrafts] = useState({});
   const [draggedCategoryId, setDraggedCategoryId] = useState(null);
   const [dragOverCategoryId, setDragOverCategoryId] = useState(null);
+  const categoryRowRefs = useRef(new Map());
+  const handledAttentionCategoryIdRef = useRef("");
+  const [highlightedCategoryId, setHighlightedCategoryId] = useState("");
 
   useEffect(() => {
     const nextDrafts = {};
@@ -66,6 +70,29 @@ export function PlannerPanel({
     setDraggedCategoryId(null);
     setDragOverCategoryId(null);
   }
+
+  useEffect(() => {
+    if (!attentionCategoryId) return;
+    if (handledAttentionCategoryIdRef.current === attentionCategoryId) return;
+
+    const target = categoryRowRefs.current.get(attentionCategoryId);
+    if (!target) return;
+
+    handledAttentionCategoryIdRef.current = attentionCategoryId;
+    target.scrollIntoView({
+      behavior: "smooth",
+      block: "center"
+    });
+    setHighlightedCategoryId(attentionCategoryId);
+
+    const timeoutId = window.setTimeout(() => {
+      setHighlightedCategoryId((current) =>
+        current === attentionCategoryId ? "" : current
+      );
+    }, 1600);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [attentionCategoryId, month]);
 
   const groupedCategories =
     view === "all"
@@ -155,7 +182,17 @@ export function PlannerPanel({
                     return (
                       <tr
                         key={category.id}
-                        className={dragOverCategoryId === category.id ? "planner-row-dragover" : ""}
+                        ref={(node) => {
+                          if (node) {
+                            categoryRowRefs.current.set(category.id, node);
+                          } else {
+                            categoryRowRefs.current.delete(category.id);
+                          }
+                        }}
+                        className={[
+                          dragOverCategoryId === category.id ? "planner-row-dragover" : "",
+                          highlightedCategoryId === category.id ? "planner-row-attention" : ""
+                        ].filter(Boolean).join(" ")}
                         onDragOver={(event) => {
                           event.preventDefault();
                           if (draggedCategoryId && draggedCategoryId !== category.id) {

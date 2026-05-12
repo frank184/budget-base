@@ -1262,6 +1262,10 @@ td.numeric {
     inset 0 -1px 0 color-mix(in srgb, var(--accent) 35%, var(--line));
 }
 
+.planner-row-attention {
+  animation: attention-pulse 1.6s ease-out;
+}
+
 .planner-empty-row {
   padding: 18px 10px;
   color: var(--muted);
@@ -1412,6 +1416,10 @@ td.numeric {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+.transaction-row-attention {
+  animation: attention-pulse 1.6s ease-out;
+}
+
 .transaction-row-date,
 .transaction-row-kind,
 .transaction-row-category {
@@ -1515,6 +1523,10 @@ td.numeric {
   margin-top: 8px;
 }
 
+.editor-panel-attention {
+  animation: panel-attention-pulse 1.6s ease-out;
+}
+
 .editor-fields+.editor-actions {
   margin-top: 10px;
 }
@@ -1535,6 +1547,30 @@ td.numeric {
   color: var(--bad);
   border-color: color-mix(in srgb, var(--bad) 35%, var(--line));
   background: color-mix(in srgb, var(--bad) 8%, var(--panel-strong));
+}
+
+@keyframes attention-pulse {
+  0% {
+    background: color-mix(in srgb, var(--accent-soft) 88%, transparent);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+
+  100% {
+    background: transparent;
+    box-shadow: inset 0 0 0 transparent;
+  }
+}
+
+@keyframes panel-attention-pulse {
+  0% {
+    border-color: color-mix(in srgb, var(--accent) 62%, var(--line));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-soft) 70%, transparent), var(--shadow);
+  }
+
+  100% {
+    border-color: var(--line);
+    box-shadow: var(--shadow);
+  }
 }
 
 :root[data-theme="dark"] .ghost-button.subtle-danger {

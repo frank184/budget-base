@@ -245,6 +245,8 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
     expense: null,
     income: null
   });
+  const [attentionCategoryId, setAttentionCategoryId] = useState("");
+  const [attentionTransactionId, setAttentionTransactionId] = useState("");
   const [showCurrencyCode, setShowCurrencyCode] = useState(
     () => getStoredBoolean(SHOW_CURRENCY_CODE_KEY, true)
   );
@@ -866,15 +868,18 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
   function handleCategoryAdd() {
     if (planView === "all") return;
 
+    const category = {
+      id: crypto.randomUUID(),
+      name: planView === "expense" ? "New expense" : "New income",
+      planned: 0,
+      type: planView
+    };
+
     patchMonth((draft) => {
-      draft.categories.push({
-        id: crypto.randomUUID(),
-        name: planView === "expense" ? "New expense" : "New income",
-        planned: 0,
-        type: planView
-      });
+      draft.categories.unshift(category);
       return draft;
     });
+    setAttentionCategoryId(category.id);
   }
 
   function handleCategoryReorder(draggedCategoryId, targetCategoryId, type) {
@@ -931,6 +936,7 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
       ...current,
       [transactionView]: transaction.id
     }));
+    setAttentionTransactionId(transaction.id);
   }
 
   function handleTransactionDelete(transactionId) {
@@ -1119,6 +1125,7 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
                 onUpdate={handleCategoryUpdate}
                 onDelete={handleCategoryDelete}
                 onReorder={handleCategoryReorder}
+                attentionCategoryId={attentionCategoryId}
               />
             </>
           ) : (
@@ -1143,6 +1150,7 @@ export function BudgetPage({ user, onLogout, theme: controlledTheme, setTheme: s
               onAdd={handleTransactionAdd}
               onUpdate={handleTransactionUpdate}
               onDelete={handleTransactionDelete}
+              attentionTransactionId={attentionTransactionId}
               formatDate={formatDate}
               formatCurrency={currencyFormatter}
             />
